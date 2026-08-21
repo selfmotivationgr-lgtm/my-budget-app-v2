@@ -66,7 +66,7 @@ st.markdown(
         background: rgba(22, 26, 36, 0.65);
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
-        padding: 5px;
+        padding: 6px;
         border-radius: 30px;
         border: 1px solid rgba(255, 255, 255, 0.08);
         margin-bottom: 20px;
@@ -74,8 +74,8 @@ st.markdown(
     }
     button[data-baseweb="tab"] {
         border-radius: 20px !important;
-        padding: 7px 14px !important;
-        font-size: 12px !important;
+        padding: 8px 16px !important;
+        font-size: 13px !important;
         font-weight: 600 !important;
         color: #9aa0b4 !important;
         border: none !important;
@@ -251,7 +251,7 @@ if st.sidebar.button("🔒 Αποσύνδεση"):
     st.session_state["authenticated"] = False
     st.rerun()
 
-# --- NAVIGATION TABS (APPLE SF-STYLE ICONS) ---
+# --- NAVIGATION TABS (ORIGINAL NAMES WITH 3D CLAYMorphism EMOJIS) ---
 (
     main_tab1,
     main_tab2,
@@ -263,14 +263,14 @@ if st.sidebar.button("🔒 Αποσύνδεση"):
     main_tab8,
 ) = st.tabs(
     [
-        "🔘 Pay",
-        "❇️ Flow",
-        "🎯 Goals",
-        "📊 Trends",
-        "⚙️ Fixed",
-        "☑️ Tasks",
-        "💳 Debt",
-        "📄 Export",
+        "👛 Dashboard",
+        "🧭 Cash Flow",
+        "🎯 Buckets",
+        "📊 Ετήσια",
+        "⚙️ Σταθερά",
+        "📋 Checklist",
+        "🏦 Δάνεια",
+        "📄 PDF",
     ]
 )
 
@@ -479,7 +479,7 @@ with main_tab1:
 # TAB 2: CASH FLOW FORECASTING
 # ==========================================
 with main_tab2:
-    st.subheader("🔮 Cash Flow Projection")
+    st.subheader("🧭 Cash Flow Projection")
     if "recurring" in st.session_state and st.session_state["recurring"]:
         upcoming_recurring = sum(float(r["amount"]) for r in st.session_state["recurring"])
     else:
@@ -544,7 +544,7 @@ with main_tab3:
 # TAB 4: ANNUAL REVIEW
 # ==========================================
 with main_tab4:
-    st.subheader(f"📈 Ετήσια Ανασκόπηση {selected_year}")
+    st.subheader(f"📊 Ετήσια Ανασκόπηση {selected_year}")
     if not df.empty:
         df_year = df[df["date"].dt.year == selected_year]
         if not df_year.empty:
@@ -656,7 +656,7 @@ with main_tab6:
 # TAB 7: DEBT SIMULATOR
 # ==========================================
 with main_tab7:
-    st.subheader("💳 Δάνεια & Πιστωτικές")
+    st.subheader("🏦 Δάνεια & Πιστωτικές")
     card_balance = st.number_input("Υπόλοιπο Πιστωτικών (€)", min_value=0.0, value=1500.0)
     loan_balance = st.number_input("Υπόλοιπο Δανείων (€)", min_value=0.0, value=8000.0)
     st.metric("Συνολικό Χρέος", f"{card_balance + loan_balance:,.2f} €")
