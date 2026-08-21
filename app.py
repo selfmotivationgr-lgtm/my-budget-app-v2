@@ -18,22 +18,25 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# --- CUSTOM CSS (REVOLUT / APPLE FINTECH THEME WITH TEXTURED BG) ---
+# --- CUSTOM CSS (APPLE PRO DARK METALLIC LIQUID TEXTURE) ---
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap');
 
     html, body, [class*="css"] {
-        font-family: 'Inter', -apple-system, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
     }
 
-    /* App Canvas with Dark Subtle Textured Pattern */
+    /* Dark Metallic Fluid Texture Background */
     .stApp {
-        background-color: #0d0e12;
-        background-image: radial-gradient(#1e212b 1px, transparent 1px), radial-gradient(#1e212b 1px, #0d0e12 1px);
-        background-size: 32px 32px;
-        background-position: 0 0, 16px 16px;
+        background-color: #08090c;
+        background-image: 
+            radial-gradient(at 0% 0%, rgba(30, 36, 50, 0.4) 0px, transparent 50%),
+            radial-gradient(at 100% 100%, rgba(15, 18, 26, 0.8) 0px, transparent 50%),
+            linear-gradient(135deg, #060709 0%, #0d1017 40%, #151a24 70%, #08090c 100%);
+        background-attachment: fixed;
+        background-size: cover;
         color: #ffffff;
     }
 
@@ -44,65 +47,72 @@ st.markdown(
     .hero-label {
         font-size: 11px;
         text-transform: uppercase;
-        letter-spacing: 1px;
+        letter-spacing: 1.5px;
         color: #8e94a5;
         font-weight: 600;
     }
     .hero-amount {
-        font-size: 38px;
+        font-size: 40px;
         font-weight: 800;
         color: #ffffff;
         letter-spacing: -1.5px;
         margin-top: 2px;
+        text-shadow: 0 4px 20px rgba(0,0,0,0.6);
     }
 
+    /* Apple-Style Glassmorphic Pill Tabs */
     div[data-baseweb="tab-list"] {
-        gap: 4px;
-        background-color: #1a1c23;
-        padding: 4px;
+        gap: 6px;
+        background: rgba(22, 26, 36, 0.65);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        padding: 5px;
         border-radius: 30px;
-        border: 1px solid #2a2d37;
-        margin-bottom: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        margin-bottom: 20px;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
     }
     button[data-baseweb="tab"] {
         border-radius: 20px !important;
-        padding: 6px 12px !important;
-        font-size: 11px !important;
+        padding: 7px 14px !important;
+        font-size: 12px !important;
         font-weight: 600 !important;
-        color: #8e94a5 !important;
+        color: #9aa0b4 !important;
         border: none !important;
         background: transparent !important;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
     button[aria-selected="true"] {
-        background: #ffffff !important;
-        color: #0d0e12 !important;
-        box-shadow: 0 4px 12px rgba(255, 255, 255, 0.15) !important;
+        background: rgba(255, 255, 255, 0.95) !important;
+        color: #08090c !important;
+        box-shadow: 0 4px 16px rgba(255, 255, 255, 0.2) !important;
     }
 
-    div[data-testid="metric-container"] {
-        background-color: #1a1c23;
-        border: 1px solid #2a2d37;
-        padding: 14px;
-        border-radius: 16px;
-    }
-
-    div[data-testid="stExpander"] {
-        background-color: #1a1c23;
-        border: 1px solid #2a2d37;
-        border-radius: 16px !important;
+    /* Apple Glass Cards */
+    div[data-testid="metric-container"], div[data-testid="stExpander"] {
+        background: rgba(22, 26, 36, 0.55) !important;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        padding: 16px;
+        border-radius: 20px !important;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
     }
     
     .stButton>button {
-        background-color: #ffffff;
-        color: #0d0e12;
+        background: #ffffff;
+        color: #08090c;
         border: none;
         border-radius: 30px;
         font-weight: 700;
-        padding: 8px 14px;
+        padding: 8px 16px;
+        box-shadow: 0 4px 12px rgba(255, 255, 255, 0.15);
+        transition: transform 0.2s ease;
     }
     .stButton>button:hover {
-        background-color: #e5e5ea;
-        color: #0d0e12;
+        background: #e5e5ea;
+        color: #08090c;
+        transform: scale(1.02);
     }
     </style>
 """,
@@ -118,16 +128,16 @@ except Exception as e:
     st.error(f"❌ Σφάλμα Secrets: {e}")
     st.stop()
 
-# --- SECURITY / PIN LOCK WITH IMAGE & CARD ---
+# --- SECURITY / PIN LOCK WITH FINTECH IMAGE ---
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
     st.markdown(
         """
-        <div style='text-align: center; padding-top: 20px;'>
-            <img src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop" 
-                 style="width: 140px; height: 140px; border-radius: 50%; object-fit: cover; border: 2px solid #2a2d37; margin-bottom: 15px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
+        <div style='text-align: center; padding-top: 25px;'>
+            <img src="https://images.unsplash.com/photo-1563986768609-322da13575f3?q=80&w=800&auto=format&fit=crop" 
+                 style="width: 250px; height: 135px; border-radius: 22px; object-fit: cover; border: 1px solid rgba(255,255,255,0.15); margin-bottom: 18px; box-shadow: 0 16px 36px rgba(0,0,0,0.7);">
             <h2 style="font-weight: 800; letter-spacing: -0.5px; margin-bottom: 4px;">Executive Wealth Engine</h2>
             <p style='color: #8e94a5; font-size: 14px;'>Εισάγετε το PIN για ασφαλή πρόσβαση</p>
         </div>
@@ -241,7 +251,7 @@ if st.sidebar.button("🔒 Αποσύνδεση"):
     st.session_state["authenticated"] = False
     st.rerun()
 
-# --- NAVIGATION TABS ---
+# --- NAVIGATION TABS (APPLE SF-STYLE ICONS) ---
 (
     main_tab1,
     main_tab2,
@@ -253,14 +263,14 @@ if st.sidebar.button("🔒 Αποσύνδεση"):
     main_tab8,
 ) = st.tabs(
     [
-        "💰 Dashboard",
-        "🔮 Cash Flow",
-        "🎯 Buckets",
-        "📈 Ετήσια",
-        "⚙️ Σταθερά",
-        "📋 Checklist",
-        "💳 Δάνεια",
-        "📄 PDF",
+        "🔘 Pay",
+        "❇️ Flow",
+        "🎯 Goals",
+        "📊 Trends",
+        "⚙️ Fixed",
+        "☑️ Tasks",
+        "💳 Debt",
+        "📄 Export",
     ]
 )
 
