@@ -130,20 +130,19 @@ st.markdown(
 
 
 def clay_header(icon: str, title: str, subtitle: str = "", accent: str = "") -> None:
-    """Renders a 3D claymorphism icon badge + title, matching the app's dark metallic look."""
+    """Renders a 3D claymorphism icon badge + title, matching the app's dark metallic look.
+    NOTE: built as a single-line string on purpose - an indented multiline f-string here
+    gets parsed by Streamlit's Markdown engine as a code block (4+ leading spaces = code
+    block in CommonMark), which is what caused stray "</div>" text to render on screen."""
     accent_class = f"accent-{accent}" if accent else ""
-    st.markdown(
-        f"""
-        <div class="clay-header">
-            <div class="clay-icon {accent_class}">{icon}</div>
-            <div>
-                <div class="clay-title">{title}</div>
-                {f'<div class="clay-subtitle">{subtitle}</div>' if subtitle else ''}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    subtitle_html = f'<div class="clay-subtitle">{subtitle}</div>' if subtitle else ""
+    html = (
+        f'<div class="clay-header">'
+        f'<div class="clay-icon {accent_class}">{icon}</div>'
+        f'<div><div class="clay-title">{title}</div>{subtitle_html}</div>'
+        f'</div>'
     )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # --- GREEK → LATIN TRANSLITERATION (fallback for PDF export without a unicode font) ---
@@ -154,13 +153,31 @@ _GREEK_MAP = {
     "α": "a", "β": "v", "γ": "g", "δ": "d", "ε": "e", "ζ": "z", "η": "i", "θ": "th",
     "ι": "i", "κ": "k", "λ": "l", "μ": "m", "ν": "n", "ξ": "x", "ο": "o", "π": "p",
     "ρ": "r", "σ": "s", "ς": "s", "τ": "t", "υ": "y", "φ": "f", "χ": "ch", "ψ": "ps",
-    "ω": "o", "ά": "a", "έ": "e", "ή": "i", "ί": "i", "ό": "o", "ύ": "y", "ώ": "o",
+    "ω": "o",
+    # Accented/tonos variants (both cases) - these were missing before and were the
+    # direct cause of the "Character outside range of helvetica" crash, since words
+    # like "Έξοδο" / "Έσοδο" start with an accented capital that fell through untouched.
+    "ά": "a", "έ": "e", "ή": "i", "ί": "i", "ό": "o", "ύ": "y", "ώ": "o",
+    "Ά": "A", "Έ": "E", "Ή": "I", "Ί": "I", "Ό": "O", "Ύ": "Y", "Ώ": "O",
+    "ϊ": "i", "ϋ": "y", "ΐ": "i", "ΰ": "y",
     "€": "EUR",
 }
 
 
 def transliterate_greek(text: str) -> str:
-    return "".join(_GREEK_MAP.get(ch, ch) for ch in str(text))
+    """Transliterates Greek to Latin for the Helvetica PDF fallback. Any character that's
+    neither ASCII nor in the map is swapped for '?' instead of passed through untouched -
+    that guarantee is what prevents a repeat of the fpdf 'outside font range' crash for any
+    character we didn't think to map."""
+    out = []
+    for ch in str(text):
+        if ch in _GREEK_MAP:
+            out.append(_GREEK_MAP[ch])
+        elif ord(ch) < 128:
+            out.append(ch)
+        else:
+            out.append("?")
+    return "".join(out)
 
 
 def _find_unicode_font() -> str | None:
@@ -246,18 +263,16 @@ if "authenticated" not in st.session_state:
 
 if not st.session_state["authenticated"]:
     st.markdown(
-        """
-        <div style='text-align: center; padding-top: 25px;'>
-            <div style="width:120px; height:120px; margin:0 auto 18px auto; border-radius:28px;
-                        display:flex; align-items:center; justify-content:center; font-size:52px;
-                        background: linear-gradient(145deg, #262c3a, #14161d);
-                        box-shadow: 8px 8px 18px rgba(0,0,0,0.6), -4px -4px 10px rgba(255,255,255,0.04),
-                                    inset 1px 1px 2px rgba(255,255,255,0.08), inset -2px -2px 6px rgba(0,0,0,0.5);
-                        border: 1px solid rgba(255,255,255,0.08);">💳</div>
-            <h2 style="font-weight: 800; letter-spacing: -0.5px; margin-bottom: 4px;">Executive Wealth Engine</h2>
-            <p style='color: #8e94a5; font-size: 14px;'>Εισάγετε το PIN για ασφαλή πρόσβαση</p>
-        </div>
-    """,
+        '<div style="text-align: center; padding-top: 25px;">'
+        '<div style="width:120px; height:120px; margin:0 auto 18px auto; border-radius:28px; '
+        'display:flex; align-items:center; justify-content:center; font-size:52px; '
+        'background: linear-gradient(145deg, #262c3a, #14161d); '
+        'box-shadow: 8px 8px 18px rgba(0,0,0,0.6), -4px -4px 10px rgba(255,255,255,0.04), '
+        'inset 1px 1px 2px rgba(255,255,255,0.08), inset -2px -2px 6px rgba(0,0,0,0.5); '
+        'border: 1px solid rgba(255,255,255,0.08);">💳</div>'
+        '<h2 style="font-weight: 800; letter-spacing: -0.5px; margin-bottom: 4px;">Executive Wealth Engine</h2>'
+        '<p style="color: #8e94a5; font-size: 14px;">Εισάγετε το PIN για ασφαλή πρόσβαση</p>'
+        '</div>',
         unsafe_allow_html=True,
     )
 
@@ -349,12 +364,10 @@ with main_tab1:
         income, expenses, balance = 0.0, 0.0, 0.0
 
     st.markdown(
-        f"""
-        <div class="hero-container">
-            <div class="hero-label">Συνολικό Υπόλοιπο ({selected_month_name})</div>
-            <div class="hero-amount">{balance:,.2f} €</div>
-        </div>
-    """,
+        f'<div class="hero-container">'
+        f'<div class="hero-label">Συνολικό Υπόλοιπο ({selected_month_name})</div>'
+        f'<div class="hero-amount">{balance:,.2f} €</div>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
