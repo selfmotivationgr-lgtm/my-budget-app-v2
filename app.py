@@ -241,20 +241,22 @@ if st.sidebar.button("🔒 Αποσύνδεση"):
     main_tab5,
     main_tab6,
     main_tab7,
+    main_tab8,
 ) = st.tabs(
     [
         "💰 Dashboard",
         "🔮 Cash Flow",
         "🎯 Buckets",
-        "📈 Investments",
+        "📈 Ετήσια",
+        "⚙️ Σταθερά",
+        "📋 Checklist",
         "💳 Δάνεια",
-        "📄 PDF Statement",
-        "🤖 Automation",
+        "📄 PDF",
     ]
 )
 
 # ==========================================
-# TAB 1: DASHBOARD & MANUAL CONTROLS
+# TAB 1: DASHBOARD
 # ==========================================
 with main_tab1:
     if not df.empty:
@@ -287,7 +289,6 @@ with main_tab1:
         unsafe_allow_html=True,
     )
 
-    # SMART BUDGET ALERT
     if monthly_budget > 0:
         pct_used = (expenses / monthly_budget) * 100
         if pct_used >= 100:
@@ -299,7 +300,7 @@ with main_tab1:
                 f"⚠️ **Προσοχή:** Έχεις φτάσει το {pct_used:.1f}% του μηνιαίου ορίου."
             )
 
-    # QUICK ADD ACTIONS
+    # QUICK ADD
     q_col1, q_col2, q_col3 = st.columns(3)
     today_str = str(datetime.date.today())
 
@@ -346,7 +347,7 @@ with main_tab1:
             st.rerun()
 
     # MANUAL INPUT FORM
-    with st.expander("➕ Πλήρης Καταγραφή Συναλλαγής (Manual Input)", expanded=False):
+    with st.expander("➕ Πλήρης Καταγραφή Συναλλαγής", expanded=False):
         with st.form("entry_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
@@ -363,7 +364,7 @@ with main_tab1:
                 )
                 note = st.text_input("Σημείωση")
 
-            if st.form_submit_button("Καταγραφή Συναλλαγής") and amount > 0:
+            if st.form_submit_button("Καταγραφή") and amount > 0:
                 supabase.table("transactions").insert(
                     {
                         "date": str(date),
@@ -373,18 +374,17 @@ with main_tab1:
                         "note": note,
                     }
                 ).execute()
-                st.success("Καταχωρήθηκε επιτυχώς!")
+                st.success("Καταχωρήθηκε!")
                 st.rerun()
 
-    # MANUAL CORRECTIONS / EDIT & DELETE SECTION
+    # EDIT / DELETE SECTION
     with st.expander("✏️ Διορθώσεις & Διαγραφή Συναλλαγών", expanded=False):
         if not filtered_df.empty:
             tx_options = {
                 row["id"]: f"ID {row['id']} | {row['date'].strftime('%Y-%m-%d')} | {row['category']} | {row['amount']:.2f}€ ({row['type']})"
                 for _, row in filtered_df.iterrows()
             }
-            selected_tx_id = st.selectbox("Επιλέξτε Συναλλαγή για Διόρθωση/Διαγραφή", list(tx_options.keys()), format_func=lambda x: tx_options[x])
-            
+            selected_tx_id = st.selectbox("Επιλέξτε Συναλλαγή", list(tx_options.keys()), format_func=lambda x: tx_options[x])
             selected_row = filtered_df[filtered_df["id"] == selected_tx_id].iloc[0]
 
             with st.form("edit_form"):
@@ -401,76 +401,66 @@ with main_tab1:
 
                 btn_save, btn_delete = st.columns(2)
                 with btn_save:
-                    if st.form_submit_button("💾 Αποθήκευση Διόρθωσης"):
-                        supabase.table("transactions").update(
-                            {
-                                "date": str(edit_date),
-                                "category": edit_category,
-                                "amount": float(edit_amount),
-                                "type": edit_type,
-                                "note": edit_note,
-                            }
-                        ).eq("id", selected_tx_id).execute()
-                        st.success("Η συναλλαγή ενημερώθηκε!")
+                    if st.form_submit_button("💾 Αποθήκευση"):
+                        supabase.table("transactions").update({
+                            "date": str(edit_date), "category": edit_category,
+                            "amount": float(edit_amount), "type": edit_type, "note": edit_note
+                        }).eq("id", selected_tx_id).execute()
+                        st.success("Ενημερώθηκε!")
                         st.rerun()
                 with btn_delete:
-                    if st.form_submit_button("🗑️ Διαγραφή Συναλλαγής"):
+                    if st.form_submit_button("🗑️ Διαγραφή"):
                         supabase.table("transactions").delete().eq("id", selected_tx_id).execute()
-                        st.warning("Η συναλλαγή διαγράφηκε!")
+                        st.warning("Διαγράφηκε!")
                         st.rerun()
-        else:
-            st.info("Δεν υπάρχουν διαθέσιμες συναλλαγές για διόρθωση.")
-
-    # AI OCR RECEIPT SCANNER
-    with st.expander("📷 AI OCR Receipt Scanner (Σάρωση Απόδειξης)", expanded=False):
-        uploaded_file = st.file_uploader("Ανεβάστε φωτογραφία απόδειξης", type=["png", "jpg", "jpeg"])
-        if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Φορτωμένη Απόδειξη", use_container_width=True)
-            st.info("⚡ Αναγνώριση στοιχείων... (Προσυμπλήρωση φόρμας)")
 
     m1, m2 = st.columns(2)
     m1.metric("Έσοδα", f"+{income:,.2f} €")
     m2.metric("Έξοδα", f"-{expenses:,.2f} €")
 
+    # CHARTS (INCOME vs EXPENSE BAR + DONUT)
     if not filtered_df.empty:
-        df_expenses = filtered_df[filtered_df["type"] == "Έξοδο"]
-        if not df_expenses.empty:
-            cat_expenses = df_expenses.groupby("category")["amount"].sum().reset_index()
-            fig_pie = px.pie(
-                cat_expenses,
-                values="amount",
-                names="category",
-                hole=0.6,
-                template="plotly_dark",
-                color_discrete_sequence=[
-                    "#30d158", "#0a84ff", "#ff453a", "#ffd60a", "#bf5af2", "#8e8e93",
-                ],
+        chart_col1, chart_col2 = st.columns(2)
+        
+        with chart_col1:
+            fig_compare = go.Figure(data=[
+                go.Bar(name='Έσοδα', x=['Σύνολο'], y=[income], marker_color='#30d158'),
+                go.Bar(name='Έξοδα', x=['Σύνολο'], y=[expenses], marker_color='#ff453a')
+            ])
+            fig_compare.update_layout(
+                barmode='group', template="plotly_dark",
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(t=10, b=10, l=10, r=10), height=220
             )
-            fig_pie.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                showlegend=False,
-                margin=dict(t=10, b=10, l=10, r=10),
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_compare, use_container_width=True)
+
+        with chart_col2:
+            df_exp = filtered_df[filtered_df["type"] == "Έξοδο"]
+            if not df_exp.empty:
+                cat_expenses = df_exp.groupby("category")["amount"].sum().reset_index()
+                fig_pie = px.pie(
+                    cat_expenses, values="amount", names="category", hole=0.6,
+                    template="plotly_dark", color_discrete_sequence=["#30d158", "#0a84ff", "#ff453a", "#ffd60a", "#bf5af2", "#8e8e93"]
+                )
+                fig_pie.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=220
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
 
         st.subheader("📜 Συναλλαγές")
         display_df = filtered_df.copy()
         display_df["date"] = display_df["date"].dt.strftime("%Y-%m-%d")
         st.dataframe(
             display_df[["id", "date", "type", "category", "amount", "note"]],
-            use_container_width=True,
-            hide_index=True,
+            use_container_width=True, hide_index=True,
         )
 
 # ==========================================
 # TAB 2: CASH FLOW FORECASTING
 # ==========================================
 with main_tab2:
-    st.subheader("🔮 30-Day Cash Flow Projection")
-    st.caption("Πρόβλεψη διαθέσιμου υπολοίπου μέχρι το τέλος του μήνα.")
-
+    st.subheader("🔮 Cash Flow Projection")
     try:
         rec_data = supabase.table("recurring_expenses").select("*").execute().data
         upcoming_recurring = sum(float(r["amount"]) for r in rec_data) if rec_data else 0.0
@@ -478,112 +468,163 @@ with main_tab2:
         upcoming_recurring = 0.0
 
     projected_remaining = balance - upcoming_recurring
-
     c_f1, c_f2 = st.columns(2)
     c_f1.metric("Τρέχον Υπόλοιπο", f"{balance:,.2f} €")
-    c_f2.metric("Αναμενόμενα Σταθερά Έξοδα", f"-{upcoming_recurring:,.2f} €")
-
+    c_f2.metric("Αναμενόμενα Σταθερά", f"-{upcoming_recurring:,.2f} €")
     st.markdown("---")
     st.metric("💡 Εκτιμώμενο Υπόλοιπο Τέλους Μήνα", f"{projected_remaining:,.2f} €")
 
 # ==========================================
-# TAB 3: SAVINGS BUCKETS (SAFE BOUNDS)
+# TAB 3: DYNAMIC SAVINGS BUCKETS
 # ==========================================
 with main_tab3:
     st.subheader("🎯 Multi-Goal Savings Buckets")
-    st.caption("Διαχωρισμός αποταμιεύσεων σε συγκεκριμένους στόχους.")
+    st.caption("Διαχειριστείτε δυναμικά τους αποταμιευτικούς σας στόχους.")
 
-    b1, b2, b3 = st.columns(3)
+    if "buckets" not in st.session_state:
+        st.session_state["buckets"] = [
+            {"name": "🚗 Συντήρηση Ι.Χ.", "current": 400.0, "target": 800.0},
+            {"name": "🏖️ Διακοπές", "current": 1200.0, "target": 1500.0},
+            {"name": "💻 Εξοπλισμός", "current": 300.0, "target": 1000.0},
+        ]
 
-    with b1:
-        st.markdown("##### 🚗 Συντήρηση Ι.Χ.")
-        b1_val = st.number_input(
-            "Υπόλοιπο (€)", min_value=0.0, value=400.0, step=50.0, key="b1"
-        )
-        b1_target = 800.0
-        b1_progress = max(0.0, min(b1_val / b1_target, 1.0))
-        st.progress(b1_progress)
-        st.caption(f"{b1_val:,.2f} € / {b1_target:,.2f} €")
+    with st.expander("➕ Προσθήκη Νέου Στόχου / Bucket", expanded=False):
+        with st.form("add_bucket_form", clear_on_submit=True):
+            b_name = st.text_input("Όνομα Στόχου")
+            b_curr = st.number_input("Τρέχον Υπόλοιπο (€)", min_value=0.0, value=0.0, step=50.0)
+            b_targ = st.number_input("Στόχος (€)", min_value=1.0, value=500.0, step=50.0)
+            if st.form_submit_button("Δημιουργία Στόχου") and b_name:
+                st.session_state["buckets"].append({
+                    "name": b_name, "current": float(b_curr), "target": float(b_targ)
+                })
+                st.success(f"Προστέθηκε: {b_name}")
+                st.rerun()
 
-    with b2:
-        st.markdown("##### 🏖️ Διακοπές")
-        b2_val = st.number_input(
-            "Υπόλοιπο (€)", min_value=0.0, value=1200.0, step=50.0, key="b2"
-        )
-        b2_target = 1500.0
-        b2_progress = max(0.0, min(b2_val / b2_target, 1.0))
-        st.progress(b2_progress)
-        st.caption(f"{b2_val:,.2f} € / {b2_target:,.2f} €")
+    st.markdown("---")
 
-    with b3:
-        st.markdown("##### 💻 Εξοπλισμός")
-        b3_val = st.number_input(
-            "Υπόλοιπο (€)", min_value=0.0, value=300.0, step=50.0, key="b3"
-        )
-        b3_target = 1000.0
-        b3_progress = max(0.0, min(b3_val / b3_target, 1.0))
-        st.progress(b3_progress)
-        st.caption(f"{b3_val:,.2f} € / {b3_target:,.2f} €")
+    if st.session_state["buckets"]:
+        for idx, bucket in enumerate(st.session_state["buckets"]):
+            col_b1, col_b2, col_b3 = st.columns([3, 2, 1])
+            with col_b1:
+                st.markdown(f"##### {bucket['name']}")
+                b_ratio = max(0.0, min(bucket["current"] / bucket["target"], 1.0))
+                st.progress(b_ratio)
+                st.caption(f"{bucket['current']:,.2f} € / {bucket['target']:,.2f} € ({b_ratio*100:.1f}%)")
+            with col_b2:
+                new_val = st.number_input("Νέο Υπόλοιπο (€)", min_value=0.0, value=float(bucket["current"]), key=f"b_val_{idx}")
+                if new_val != bucket["current"]:
+                    st.session_state["buckets"][idx]["current"] = new_val
+                    st.rerun()
+            with col_b3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🗑️", key=f"del_b_{idx}"):
+                    st.session_state["buckets"].pop(idx)
+                    st.rerun()
+            st.markdown("---")
 
 # ==========================================
-# TAB 4: INVESTMENTS & COMPOUND INTEREST
+# TAB 4: ANNUAL REVIEW
 # ==========================================
 with main_tab4:
-    st.subheader("📈 Investments & Compound Interest")
-    initial_inv = st.number_input("Αρχικό Κεφάλαιο (€)", min_value=0.0, value=1000.0)
-    monthly_contrib = st.number_input("Μηνιαία Κατάθεση (€)", min_value=0.0, value=200.0)
-    annual_return = st.slider("Ετήσια Απόδοση (%)", min_value=1.0, max_value=15.0, value=8.0)
-    years_horizon = st.slider("Ορίζοντας (Έτη)", min_value=1, max_value=30, value=10)
+    st.subheader(f"📈 Ετήσια Ανασκόπηση {selected_year}")
+    if not df.empty:
+        df_year = df[df["date"].dt.year == selected_year]
+        if not df_year.empty:
+            y_income = df_year[df_year["type"] == "Έσοδο"]["amount"].sum()
+            y_expenses = df_year[df_year["type"] == "Έξοδο"]["amount"].sum()
+            
+            col_y1, col_y2, col_y3 = st.columns(3)
+            col_y1.metric("Ετήσια Έσοδα", f"+{y_income:,.2f} €")
+            col_y2.metric("Ετήσια Έξοδα", f"-{y_expenses:,.2f} €")
+            col_y3.metric("Ετήσιο Καθαρό", f"{y_income - y_expenses:,.2f} €")
 
-    months = years_horizon * 12
-    rate_monthly = (annual_return / 100) / 12
-    future_val = initial_inv * ((1 + rate_monthly) ** months)
-    for m in range(1, months + 1):
-        future_val += monthly_contrib * ((1 + rate_monthly) ** (months - m))
-
-    st.metric("🚀 Εκτιμώμενη Μελλοντική Αξία", f"{future_val:,.2f} €")
+            df_year["month"] = df_year["date"].dt.month
+            monthly_summary = df_year.groupby(["month", "type"])["amount"].sum().unstack(fill_value=0).reset_index()
+            
+            fig_annual = px.bar(
+                monthly_summary, x="month", y=["Έσοδο", "Έξοδο"] if "Έσοδο" in monthly_summary.columns and "Έξοδο" in monthly_summary.columns else monthly_summary.columns[1:],
+                barmode="group", template="plotly_dark",
+                color_discrete_map={"Έσοδο": "#30d158", "Έξοδο": "#ff453a"}
+            )
+            fig_annual.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_annual, use_container_width=True)
 
 # ==========================================
-# TAB 5: DEBT SIMULATOR
+# TAB 5: FIXED RECURRING EXPENSES
 # ==========================================
 with main_tab5:
+    st.subheader("⚙️ Σταθερά Έξοδα (Recurring)")
+    st.caption("Πλήρως παραμετροποιήσιμη διαχείριση πάγιων υποχρεώσεων.")
+
+    if "recurring" not in st.session_state:
+        st.session_state["recurring"] = [
+            {"title": "Ενοίκιο", "amount": 450.0, "due_day": 1},
+            {"title": "Internet / Κοινόχρηστα", "amount": 35.0, "due_day": 10},
+            {"title": "Συνδρομές (Streaming)", "amount": 15.99, "due_day": 15},
+        ]
+
+    with st.expander("➕ Προσθήκη Σταθερού Εξόδου", expanded=False):
+        with st.form("add_rec_form", clear_on_submit=True):
+            r_title = st.text_input("Τίτλος Εξόδου")
+            r_amount = st.number_input("Ποσό (€)", min_value=0.0, value=50.0, step=5.0)
+            r_day = st.number_input("Ημέρα Πληρωμής", min_value=1, max_value=31, value=1)
+            if st.form_submit_button("Προσθήκη") and r_title:
+                st.session_state["recurring"].append({"title": r_title, "amount": float(r_amount), "due_day": int(r_day)})
+                st.success("Προστέθηκε!")
+                st.rerun()
+
+    rec_df = pd.DataFrame(st.session_state["recurring"])
+    st.dataframe(rec_df, use_container_width=True, hide_index=True)
+
+# ==========================================
+# TAB 6: WEEKLY CHECKLIST
+# ==========================================
+with main_tab6:
+    st.subheader("📋 Εβδομαδιαίο Checklist")
+    st.caption("Προσθέστε, τσεκάρετε ή διαγράψτε εργασίες.")
+
+    if "checklist" not in st.session_state:
+        st.session_state["checklist"] = [
+            {"task": "Έλεγχος υπολοίπου τραπέζης", "done": False},
+            {"task": "Καταχώρηση αποδείξεων εβδομάδας", "done": True},
+            {"task": "Πληρωμή λογαριασμών", "done": False},
+        ]
+
+    new_task = st.text_input("➕ Νέα Εργασία Checklist")
+    if st.button("Προσθήκη Εργασίας") and new_task:
+        st.session_state["checklist"].append({"task": new_task, "done": False})
+        st.rerun()
+
+    st.markdown("---")
+    for idx, item in enumerate(st.session_state["checklist"]):
+        c_col1, c_col2 = st.columns([4, 1])
+        with c_col1:
+            st.session_state["checklist"][idx]["done"] = st.checkbox(item["task"], value=item["done"], key=f"chk_{idx}")
+        with c_col2:
+            if st.button("🗑️", key=f"del_chk_{idx}"):
+                st.session_state["checklist"].pop(idx)
+                st.rerun()
+
+# ==========================================
+# TAB 7: DEBT SIMULATOR
+# ==========================================
+with main_tab7:
     st.subheader("💳 Δάνεια & Πιστωτικές")
     card_balance = st.number_input("Υπόλοιπο Πιστωτικών (€)", min_value=0.0, value=1500.0)
     loan_balance = st.number_input("Υπόλοιπο Δανείων (€)", min_value=0.0, value=8000.0)
     st.metric("Συνολικό Χρέος", f"{card_balance + loan_balance:,.2f} €")
 
 # ==========================================
-# TAB 6: PDF FINANCIAL STATEMENT
+# TAB 8: PDF STATEMENT
 # ==========================================
-with main_tab6:
-    st.subheader("📄 Εξαγωγή Μηνιαίου PDF Statement")
-    st.caption("Δημιουργήστε ένα επίσημο οικονομικό report 1 σελίδας.")
-
+with main_tab8:
+    st.subheader("📄 Εξαγωγή PDF Statement")
     if not filtered_df.empty:
-        pdf_bytes = create_pdf_report(
-            selected_month_name, selected_year, income, expenses, balance, filtered_df
-        )
+        pdf_bytes = create_pdf_report(selected_month_name, selected_year, income, expenses, balance, filtered_df)
         st.download_button(
             label=f"📥 Λήψη PDF Αναφοράς ({selected_month_name} {selected_year})",
-            data=pdf_bytes,
-            file_name=f"statement_{selected_year}_{selected_month:02d}.pdf",
-            mime="application/pdf",
-            use_container_width=True,
+            data=pdf_bytes, file_name=f"statement_{selected_year}_{selected_month:02d}.pdf",
+            mime="application/pdf", use_container_width=True
         )
     else:
         st.info("Δεν υπάρχουν συναλλαγές για την παραγωγή PDF.")
-
-# ==========================================
-# TAB 7: TELEGRAM BOT & AUTOMATIONS
-# ==========================================
-with main_tab7:
-    st.subheader("🤖 Telegram Bot & Auto-Recurring Tasks")
-    st.markdown(
-        """
-        ##### 1. Telegram Bot Integration
-        Στείλτε μήνυμα στο Telegram: `Καφές 2.50` και θα καταχωρηθεί αυτόματα!
-        
-        ##### 2. Auto-Recurring Expenses
-        Τα σταθερά σας έξοδα μπορούν να καταχωρούνται αυτόματα την 1η κάθε μήνα μέσω Supabase Database Cron Triggers.
-    """
-    )
