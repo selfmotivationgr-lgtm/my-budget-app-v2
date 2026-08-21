@@ -1,0 +1,8 @@
+streamlit
+pandas
+plotly
+supabase
+postgrest
+fpdf2
+pillow
+pytesseract
