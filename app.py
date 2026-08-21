@@ -611,10 +611,14 @@ with main_tab5:
 
     if "recurring" not in st.session_state:
         st.session_state["recurring"] = [
-            {"title": "Ενοίκιο", "amount": 450.0, "due_day": 1},
-            {"title": "Internet / Κοινόχρηστα", "amount": 35.0, "due_day": 10},
-            {"title": "Συνδρομές (Streaming)", "amount": 15.99, "due_day": 15},
+            {"title": "Ενοίκιο", "amount": 450.0, "due_day": 1, "paid": False},
+            {"title": "Internet / Κοινόχρηστα", "amount": 35.0, "due_day": 10, "paid": False},
+            {"title": "Συνδρομές (Streaming)", "amount": 15.99, "due_day": 15, "paid": False},
         ]
+    else:
+        # Backfill "paid" for anyone who added recurring items before this field existed
+        for item in st.session_state["recurring"]:
+            item.setdefault("paid", False)
 
     with st.expander("➕ Προσθήκη Νέου Σταθερού Εξόδου", expanded=False):
         with st.form("add_rec_form", clear_on_submit=True):
@@ -622,7 +626,9 @@ with main_tab5:
             r_amount = st.number_input("Ποσό (€)", min_value=0.0, value=50.0, step=5.0)
             r_day = st.number_input("Ημέρα Πληρωμής (1-31)", min_value=1, max_value=31, value=1)
             if st.form_submit_button("Προσθήκη Σταθερού") and r_title:
-                st.session_state["recurring"].append({"title": r_title, "amount": float(r_amount), "due_day": int(r_day)})
+                st.session_state["recurring"].append(
+                    {"title": r_title, "amount": float(r_amount), "due_day": int(r_day), "paid": False}
+                )
                 st.success(f"Προστέθηκε: {r_title}")
                 st.rerun()
 
@@ -636,9 +642,12 @@ with main_tab5:
     for idx, item in enumerate(st.session_state["recurring"]):
         col_r1, col_r2, col_r3, col_r4 = st.columns([3, 2, 2, 1])
         with col_r1:
-            status = "✅ Πληρώθηκε" if item["due_day"] < today_day else "⏳ Εκκρεμεί"
             st.markdown(f"**{item['title']}**")
-            st.caption(f"Πληρωμή στις {item['due_day']} του μηνός · {status}")
+            st.caption(f"Πληρωμή στις {item['due_day']} του μηνός")
+            new_paid = st.checkbox("Πληρώθηκε", value=item["paid"], key=f"rec_paid_{idx}")
+            if new_paid != item["paid"]:
+                st.session_state["recurring"][idx]["paid"] = new_paid
+                st.rerun()
         with col_r2:
             new_amt = st.number_input("Ποσό (€)", min_value=0.0, value=float(item["amount"]), step=5.0, key=f"rec_amt_{idx}")
             if new_amt != item["amount"]:
