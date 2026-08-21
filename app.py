@@ -302,6 +302,19 @@ def fetch_transactions():
     return response.data
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_savings():
+    """Reads from a separate 'savings' table - this is a genuinely different account,
+    so it is never mixed into the main transactions/income-expense numbers."""
+    response = (
+        supabase.table("savings")
+        .select("*")
+        .order("date", desc=True)
+        .execute()
+    )
+    return response.data
+
+
 try:
     data = fetch_transactions()
     df = pd.DataFrame(data) if data else pd.DataFrame()
@@ -312,10 +325,25 @@ except Exception as err:
 if not df.empty:
     df["date"] = pd.to_datetime(df["date"])
 
+try:
+    savings_data = fetch_savings()
+    savings_df = pd.DataFrame(savings_data) if savings_data else pd.DataFrame()
+except Exception as err:
+    st.error(f"🔍 Σφάλμα Supabase (Αποταμίευση): {err}")
+    savings_df = pd.DataFrame()
+
+if not savings_df.empty:
+    savings_df["date"] = pd.to_datetime(savings_df["date"])
+
 
 def refresh_and_rerun():
     """Clears the transactions cache so writes show up immediately, then reruns."""
     fetch_transactions.clear()
+    st.rerun()
+
+
+def refresh_savings_and_rerun():
+    fetch_savings.clear()
     st.rerun()
 
 
@@ -338,11 +366,11 @@ if st.sidebar.button("🔒 Αποσύνδεση"):
 
 # --- NAVIGATION TABS ---
 (
-    main_tab1, main_tab2, main_tab3, main_tab4,
+    main_tab1, main_tab2, main_tab3, main_tab4, main_tab_savings,
     main_tab5, main_tab6, main_tab7, main_tab8,
 ) = st.tabs(
     [
-        "👛 Dashboard", "🧭 Cash Flow", "🎯 Buckets", "📊 Ετήσια",
+        "👛 Dashboard", "🧭 Cash Flow", "🎯 Buckets", "📊 Ετήσια", "💰 Αποταμίευση",
         "⚙️ Σταθερά", "📋 Checklist", "🏦 Δάνεια", "📄 PDF",
     ]
 )
@@ -603,6 +631,124 @@ with main_tab4:
             st.info(f"Δεν υπάρχουν συναλλαγές για το {selected_year}.")
     else:
         st.info("Δεν υπάρχουν δεδομένα ακόμα.")
+
+# ==========================================
+# TAB: ΑΠΟΤΑΜΙΕΥΣΗ (separate savings account - never mixed with the checking
+# account's income/expenses above)
+# ==========================================
+with main_tab_savings:
+    clay_header("💰", "Αποταμίευση", "Ξεχωριστός λογαριασμός - μόνο καταθέσεις/αναλήψεις αποταμίευσης", accent="gold")
+
+    if not savings_df.empty:
+        s_deposits = savings_df.loc[savings_df["type"] == "Κατάθεση", "amount"].sum()
+        s_withdrawals = savings_df.loc[savings_df["type"] == "Ανάληψη", "amount"].sum()
+        savings_balance = s_deposits - s_withdrawals
+    else:
+        s_deposits, s_withdrawals, savings_balance = 0.0, 0.0, 0.0
+
+    st.markdown(
+        f'<div class="hero-container">'
+        f'<div class="hero-label">Υπόλοιπο Αποταμίευσης</div>'
+        f'<div class="hero-amount">{savings_balance:,.2f} €</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    s_m1, s_m2 = st.columns(2)
+    s_m1.metric("Σύνολο Καταθέσεων", f"+{s_deposits:,.2f} €")
+    s_m2.metric("Σύνολο Αναλήψεων", f"-{s_withdrawals:,.2f} €")
+
+    with st.expander("➕ Νέα Κίνηση Αποταμίευσης", expanded=False):
+        with st.form("savings_entry_form", clear_on_submit=True):
+            sv_col1, sv_col2 = st.columns(2)
+            with sv_col1:
+                sv_date = st.date_input("Ημερομηνία", datetime.date.today(), key="sv_date")
+                sv_type = st.selectbox("Τύπος", ["Κατάθεση", "Ανάληψη"], key="sv_type")
+            with sv_col2:
+                sv_amount = st.number_input("Ποσό (€)", min_value=0.0, format="%.2f", key="sv_amount")
+                sv_note = st.text_input("Σημείωση", key="sv_note")
+
+            if st.form_submit_button("Καταγραφή") and sv_amount > 0:
+                try:
+                    supabase.table("savings").insert(
+                        {"date": str(sv_date), "type": sv_type, "amount": float(sv_amount), "note": sv_note}
+                    ).execute()
+                    st.success("Καταχωρήθηκε!")
+                    refresh_savings_and_rerun()
+                except Exception as e:
+                    st.error(f"Σφάλμα καταχώρησης: {e}")
+
+    with st.expander("✏️ Διορθώσεις & Διαγραφή Κινήσεων", expanded=False):
+        if not savings_df.empty:
+            sv_tx_options = {
+                row["id"]: f"ID {row['id']} | {row['date'].strftime('%Y-%m-%d')} | {row['type']} | {row['amount']:.2f}€"
+                for _, row in savings_df.iterrows()
+            }
+            sv_selected_id = st.selectbox("Επιλέξτε Κίνηση", list(sv_tx_options.keys()), format_func=lambda x: sv_tx_options[x])
+            sv_selected_row = savings_df[savings_df["id"] == sv_selected_id].iloc[0]
+
+            with st.form("savings_edit_form"):
+                sve_col1, sve_col2 = st.columns(2)
+                with sve_col1:
+                    sv_edit_date = st.date_input("Νέα Ημερομηνία", pd.to_datetime(sv_selected_row["date"]))
+                    sv_edit_type = st.selectbox(
+                        "Νέος Τύπος", ["Κατάθεση", "Ανάληψη"],
+                        index=0 if sv_selected_row["type"] == "Κατάθεση" else 1,
+                    )
+                with sve_col2:
+                    sv_edit_amount = st.number_input("Νέο Ποσό (€)", min_value=0.0, value=float(sv_selected_row["amount"]), format="%.2f")
+                    sv_edit_note = st.text_input("Νέα Σημείωση", value=str(sv_selected_row["note"]) if pd.notna(sv_selected_row["note"]) else "")
+
+                sv_btn_save, sv_btn_delete = st.columns(2)
+                with sv_btn_save:
+                    if st.form_submit_button("💾 Αποθήκευση"):
+                        try:
+                            supabase.table("savings").update({
+                                "date": str(sv_edit_date), "type": sv_edit_type,
+                                "amount": float(sv_edit_amount), "note": sv_edit_note,
+                            }).eq("id", sv_selected_id).execute()
+                            st.success("Ενημερώθηκε!")
+                            refresh_savings_and_rerun()
+                        except Exception as e:
+                            st.error(f"Σφάλμα ενημέρωσης: {e}")
+                with sv_btn_delete:
+                    if st.form_submit_button("🗑️ Διαγραφή"):
+                        try:
+                            supabase.table("savings").delete().eq("id", sv_selected_id).execute()
+                            st.warning("Διαγράφηκε!")
+                            refresh_savings_and_rerun()
+                        except Exception as e:
+                            st.error(f"Σφάλμα διαγραφής: {e}")
+        else:
+            st.caption("Δεν υπάρχουν κινήσεις αποταμίευσης ακόμα.")
+
+    if not savings_df.empty:
+        st.markdown("---")
+        st.subheader("📈 Πορεία Αποταμίευσης")
+        sv_chart_df = savings_df.sort_values("date").copy()
+        sv_chart_df["signed_amount"] = sv_chart_df.apply(
+            lambda r: r["amount"] if r["type"] == "Κατάθεση" else -r["amount"], axis=1
+        )
+        sv_chart_df["cumulative"] = sv_chart_df["signed_amount"].cumsum()
+        fig_savings = px.area(
+            sv_chart_df, x="date", y="cumulative", template="plotly_dark",
+        )
+        fig_savings.update_traces(line_color="#ffd60a", fillcolor="rgba(255, 214, 10, 0.15)")
+        fig_savings.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(t=10, b=10, l=10, r=10), height=240,
+            xaxis_title=None, yaxis_title=None,
+        )
+        st.plotly_chart(fig_savings, use_container_width=True)
+
+        st.subheader("📜 Ιστορικό Κινήσεων")
+        sv_display_df = savings_df.copy()
+        sv_display_df["date"] = sv_display_df["date"].dt.strftime("%Y-%m-%d")
+        st.dataframe(
+            sv_display_df[["id", "date", "type", "amount", "note"]],
+            use_container_width=True, hide_index=True,
+        )
+
 
 # ==========================================
 # TAB 5: FIXED RECURRING EXPENSES
