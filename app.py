@@ -18,7 +18,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# --- CUSTOM CSS (REVOLUT / APPLE FINTECH THEME) ---
+# --- CUSTOM CSS (REVOLUT / APPLE FINTECH THEME WITH TEXTURED BG) ---
 st.markdown(
     """
     <style>
@@ -28,8 +28,12 @@ st.markdown(
         font-family: 'Inter', -apple-system, sans-serif;
     }
 
+    /* App Canvas with Dark Subtle Textured Pattern */
     .stApp {
         background-color: #0d0e12;
+        background-image: radial-gradient(#1e212b 1px, transparent 1px), radial-gradient(#1e212b 1px, #0d0e12 1px);
+        background-size: 32px 32px;
+        background-position: 0 0, 16px 16px;
         color: #ffffff;
     }
 
@@ -114,29 +118,34 @@ except Exception as e:
     st.error(f"❌ Σφάλμα Secrets: {e}")
     st.stop()
 
-# --- SECURITY / PIN LOCK ---
+# --- SECURITY / PIN LOCK WITH IMAGE & CARD ---
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
     st.markdown(
         """
-        <div style='text-align: center; padding: 40px 0;'>
-            <h2>🔒 Πρόσβαση στο Wealth Engine</h2>
-            <p style='color: #8e94a5;'>Εισάγετε το PIN για να συνεχίσετε</p>
+        <div style='text-align: center; padding-top: 20px;'>
+            <img src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop" 
+                 style="width: 140px; height: 140px; border-radius: 50%; object-fit: cover; border: 2px solid #2a2d37; margin-bottom: 15px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
+            <h2 style="font-weight: 800; letter-spacing: -0.5px; margin-bottom: 4px;">Executive Wealth Engine</h2>
+            <p style='color: #8e94a5; font-size: 14px;'>Εισάγετε το PIN για ασφαλή πρόσβαση</p>
         </div>
     """,
         unsafe_allow_html=True,
     )
-    pin_input = st.text_input(
-        "PIN", type="password", label_visibility="collapsed"
-    )
-    if st.button("Ξεκλείδωμα", use_container_width=True):
-        if pin_input == st.secrets.get("APP_PIN", "1234"):
-            st.session_state["authenticated"] = True
-            st.rerun()
-        else:
-            st.error("Λανθασμένο PIN.")
+
+    col_login1, col_login2, col_login3 = st.columns([1, 2, 1])
+    with col_login2:
+        pin_input = st.text_input(
+            "PIN", type="password", label_visibility="collapsed"
+        )
+        if st.button("🔓 Ξεκλείδωμα", use_container_width=True):
+            if pin_input == st.secrets.get("APP_PIN", "1234"):
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("❌ Λανθασμένο PIN.")
     st.stop()
 
 # --- HELPER: UNICODE-SAFE PDF GENERATOR ---
@@ -457,31 +466,21 @@ with main_tab1:
         )
 
 # ==========================================
-# TAB 2: CASH FLOW FORECASTING (FIXED DATA SOURCE)
+# TAB 2: CASH FLOW FORECASTING
 # ==========================================
 with main_tab2:
-    st.subheader("🔮 30-Day Cash Flow Projection")
-    st.caption("Πρόβλεψη διαθέσιμου υπολοίπου μέχρι το τέλος του μήνα με βάση τα Σταθερά Έξοδα.")
-
-    # Υπολογισμός συνολικών σταθερών εξόδων από το Session State (Tab 5)
+    st.subheader("🔮 Cash Flow Projection")
     if "recurring" in st.session_state and st.session_state["recurring"]:
         upcoming_recurring = sum(float(r["amount"]) for r in st.session_state["recurring"])
     else:
         upcoming_recurring = 0.0
 
     projected_remaining = balance - upcoming_recurring
-
     c_f1, c_f2 = st.columns(2)
     c_f1.metric("Τρέχον Υπόλοιπο (Dashboard)", f"{balance:,.2f} €")
     c_f2.metric("Σύνολο Σταθερών Εξόδων (Tab 5)", f"-{upcoming_recurring:,.2f} €")
-
     st.markdown("---")
     st.metric("💡 Εκτιμώμενο Υπόλοιπο Τέλους Μήνα", f"{projected_remaining:,.2f} €")
-
-    if projected_remaining < 0:
-        st.error("⚠️ **Προσοχή:** Το εκτιμώμενο υπόλοιπο είναι αρνητικό! Τα σταθερά σου έξοδα ξεπερνούν το τρέχον διαθέσιμο υπόλοιπο.")
-    else:
-        st.success("✅ **Θετική πρόβλεψη:** Έχεις επαρκές υπόλοιπο για την κάλυψη των σταθερών σου υποχρεώσεων.")
 
 # ==========================================
 # TAB 3: DYNAMIC SAVINGS BUCKETS
@@ -565,7 +564,6 @@ with main_tab5:
     st.subheader("⚙️ Σταθερά Έξοδα (Recurring)")
     st.caption("Πλήρως παραμετροποιήσιμη διαχείριση πάγιων υποχρεώσεων.")
 
-    # Αρχικοποίηση Σταθερών Εξόδων στο Session State
     if "recurring" not in st.session_state:
         st.session_state["recurring"] = [
             {"title": "Ενοίκιο", "amount": 450.0, "due_day": 1},
@@ -573,30 +571,20 @@ with main_tab5:
             {"title": "Συνδρομές (Streaming)", "amount": 15.99, "due_day": 15},
         ]
 
-    # Φόρμα Προσθήκης Νέου Σταθερού Εξόδου
     with st.expander("➕ Προσθήκη Νέου Σταθερού Εξόδου", expanded=False):
         with st.form("add_rec_form", clear_on_submit=True):
-            r_title = st.text_input("Τίτλος Εξόδου (π.χ. ΔΕΗ / Ρεύμα)")
-            r_amount = st.number_input(
-                "Ποσό (€)", min_value=0.0, value=50.0, step=5.0
-            )
-            r_day = st.number_input(
-                "Ημέρα Πληρωμής (1-31)", min_value=1, max_value=31, value=1
-            )
+            r_title = st.text_input("Τίτλος Εξόδου")
+            r_amount = st.number_input("Ποσό (€)", min_value=0.0, value=50.0, step=5.0)
+            r_day = st.number_input("Ημέρα Πληρωμής (1-31)", min_value=1, max_value=31, value=1)
             if st.form_submit_button("Προσθήκη Σταθερού") and r_title:
-                st.session_state["recurring"].append(
-                    {
-                        "title": r_title,
-                        "amount": float(r_amount),
-                        "due_day": int(r_day),
-                    }
-                )
+                st.session_state["recurring"].append({
+                    "title": r_title, "amount": float(r_amount), "due_day": int(r_day)
+                })
                 st.success(f"Προστέθηκε: {r_title}")
                 st.rerun()
 
     st.markdown("---")
 
-    # Προβολή, Επεξεργασία & Αφαίρεση Σταθερών Εξόδων
     if st.session_state["recurring"]:
         total_rec = sum(item["amount"] for item in st.session_state["recurring"])
         st.markdown(f"##### 📌 Συνολικά Σταθερά Έξοδα: **{total_rec:,.2f} €/μήνα**")
@@ -604,48 +592,26 @@ with main_tab5:
 
         for idx, item in enumerate(st.session_state["recurring"]):
             col_r1, col_r2, col_r3, col_r4 = st.columns([3, 2, 2, 1])
-
             with col_r1:
                 st.markdown(f"**{item['title']}**")
                 st.caption(f"Πληρωμή στις {item['due_day']} του μηνός")
-
             with col_r2:
-                # Δυνατότητα αλλαγής ποσού επί τόπου
-                new_amt = st.number_input(
-                    "Ποσό (€)",
-                    min_value=0.0,
-                    value=float(item["amount"]),
-                    step=5.0,
-                    key=f"rec_amt_{idx}",
-                )
+                new_amt = st.number_input("Ποσό (€)", min_value=0.0, value=float(item["amount"]), step=5.0, key=f"rec_amt_{idx}")
                 if new_amt != item["amount"]:
                     st.session_state["recurring"][idx]["amount"] = new_amt
                     st.rerun()
-
             with col_r3:
-                # Δυνατότητα αλλαγής ημέρας πληρωμής
-                new_day = st.number_input(
-                    "Ημέρα",
-                    min_value=1,
-                    max_value=31,
-                    value=int(item["due_day"]),
-                    key=f"rec_day_{idx}",
-                )
+                new_day = st.number_input("Ημέρα", min_value=1, max_value=31, value=int(item["due_day"]), key=f"rec_day_{idx}")
                 if new_day != item["due_day"]:
                     st.session_state["recurring"][idx]["due_day"] = new_day
                     st.rerun()
-
             with col_r4:
                 st.markdown("<br>", unsafe_allow_html=True)
-                # ΚΟΥΜΠΙ ΔΙΑΓΡΑΦΗΣ
                 if st.button("🗑️", key=f"del_rec_{idx}"):
                     st.session_state["recurring"].pop(idx)
                     st.toast(f"Διαγράφηκε: {item['title']}", icon="🗑️")
                     st.rerun()
-
             st.markdown("---")
-    else:
-        st.info("Δεν έχετε καταχωρημένα σταθερά έξοδα. Προσθέστε ένα παραπάνω!")
 
 # ==========================================
 # TAB 6: WEEKLY CHECKLIST
