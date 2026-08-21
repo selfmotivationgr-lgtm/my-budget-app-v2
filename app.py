@@ -139,22 +139,30 @@ if not st.session_state["authenticated"]:
             st.error("Λανθασμένο PIN.")
     st.stop()
 
-# --- HELPER: PDF GENERATOR ---
+# --- HELPER: UNICODE-SAFE PDF GENERATOR ---
 def create_pdf_report(month_name, year, income, expenses, balance, df_data):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
-    
-    pdf.cell(0, 10, f"Executive Financial Statement - {month_name} {year}", ln=True, align="C")
+
+    months_map = {
+        "Ιανουάριος": "January", "Φεβρουάριος": "February", "Μάρτιος": "March",
+        "Απρίλιος": "April", "Μάιος": "May", "Ιούνιος": "June",
+        "Ιούλιος": "July", "Αύγουστος": "August", "Σεπτέμβριος": "September",
+        "Οκτώβριος": "October", "Νοέμβριος": "November", "Δεκέμβριος": "December"
+    }
+    safe_month = months_map.get(month_name, month_name)
+
+    pdf.cell(0, 10, f"Executive Financial Statement - {safe_month} {year}", ln=True, align="C")
     pdf.ln(5)
-    
+
     pdf.set_font("Helvetica", "", 12)
     pdf.cell(0, 8, f"Total Income: {income:,.2f} EUR", ln=True)
     pdf.cell(0, 8, f"Total Expenses: {expenses:,.2f} EUR", ln=True)
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, f"Net Balance: {balance:,.2f} EUR", ln=True)
     pdf.ln(10)
-    
+
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(30, 8, "Date", 1)
     pdf.cell(30, 8, "Type", 1)
@@ -162,17 +170,21 @@ def create_pdf_report(month_name, year, income, expenses, balance, df_data):
     pdf.cell(30, 8, "Amount", 1)
     pdf.cell(55, 8, "Note", 1)
     pdf.ln()
-    
+
     pdf.set_font("Helvetica", "", 9)
     for _, row in df_data.iterrows():
         date_str = row["date"].strftime("%Y-%m-%d") if hasattr(row["date"], "strftime") else str(row["date"])
+        safe_type = str(row["type"]).encode("latin-1", "ignore").decode("latin-1") or "N/A"
+        safe_cat = str(row["category"]).encode("latin-1", "ignore").decode("latin-1") or "Category"
+        safe_note = str(row["note"]).encode("latin-1", "ignore").decode("latin-1") or ""
+
         pdf.cell(30, 7, date_str, 1)
-        pdf.cell(30, 7, str(row["type"]), 1)
-        pdf.cell(45, 7, str(row["category"])[:20], 1)
+        pdf.cell(30, 7, safe_type, 1)
+        pdf.cell(45, 7, safe_cat[:20], 1)
         pdf.cell(30, 7, f"{row['amount']:.2f} EUR", 1)
-        pdf.cell(55, 7, str(row["note"])[:25], 1)
+        pdf.cell(55, 7, safe_note[:25], 1)
         pdf.ln()
-        
+
     return bytes(pdf.output())
 
 # --- FETCH DATA ---
@@ -193,7 +205,7 @@ if not df.empty:
     df["date"] = pd.to_datetime(df["date"])
 
 # --- SIDEBAR FILTERS ---
-st.sidebar.header("🗓️ Περίοδος")
+st.sidebar.header("🗓️ Περίοδος & Στόχοι")
 now = datetime.datetime.now()
 current_year = now.year
 current_month = now.month
@@ -242,7 +254,7 @@ if st.sidebar.button("🔒 Αποσύνδεση"):
 )
 
 # ==========================================
-# TAB 1: DASHBOARD & AI OCR SCANNER
+# TAB 1: DASHBOARD & MANUAL CONTROLS
 # ==========================================
 with main_tab1:
     if not df.empty:
@@ -287,15 +299,7 @@ with main_tab1:
                 f"⚠️ **Προσοχή:** Έχεις φτάσει το {pct_used:.1f}% του μηνιαίου ορίου."
             )
 
-    # AI OCR RECEIPT SCANNER SECTION
-    with st.expander("📷 AI OCR Receipt Scanner (Σάρωση Απόδειξης)", expanded=False):
-        uploaded_file = st.file_uploader("Ανεβάστε φωτογραφία απόδειξης", type=["png", "jpg", "jpeg"])
-        if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Φορτωμένη Απόδειξη", use_container_width=True)
-            st.info("⚡ Αναγνώριση στοιχείων... (Προσυμπλήρωση φόρμας)")
-
-    # Quick Add Buttons
+    # QUICK ADD ACTIONS
     q_col1, q_col2, q_col3 = st.columns(3)
     today_str = str(datetime.date.today())
 
@@ -341,7 +345,8 @@ with main_tab1:
             st.toast("Προστέθηκε: Supermarket 50.00€", icon="🛒")
             st.rerun()
 
-    with st.expander("➕ Πλήρης Καταγραφή Συναλλαγής", expanded=False):
+    # MANUAL INPUT FORM
+    with st.expander("➕ Πλήρης Καταγραφή Συναλλαγής (Manual Input)", expanded=False):
         with st.form("entry_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
@@ -358,7 +363,7 @@ with main_tab1:
                 )
                 note = st.text_input("Σημείωση")
 
-            if st.form_submit_button("Καταγραφή") and amount > 0:
+            if st.form_submit_button("Καταγραφή Συναλλαγής") and amount > 0:
                 supabase.table("transactions").insert(
                     {
                         "date": str(date),
@@ -368,8 +373,61 @@ with main_tab1:
                         "note": note,
                     }
                 ).execute()
-                st.success("Αποθηκεύτηκε!")
+                st.success("Καταχωρήθηκε επιτυχώς!")
                 st.rerun()
+
+    # MANUAL CORRECTIONS / EDIT & DELETE SECTION
+    with st.expander("✏️ Διορθώσεις & Διαγραφή Συναλλαγών", expanded=False):
+        if not filtered_df.empty:
+            tx_options = {
+                row["id"]: f"ID {row['id']} | {row['date'].strftime('%Y-%m-%d')} | {row['category']} | {row['amount']:.2f}€ ({row['type']})"
+                for _, row in filtered_df.iterrows()
+            }
+            selected_tx_id = st.selectbox("Επιλέξτε Συναλλαγή για Διόρθωση/Διαγραφή", list(tx_options.keys()), format_func=lambda x: tx_options[x])
+            
+            selected_row = filtered_df[filtered_df["id"] == selected_tx_id].iloc[0]
+
+            with st.form("edit_form"):
+                e_col1, e_col2 = st.columns(2)
+                with e_col1:
+                    edit_date = st.date_input("Νέα Ημερομηνία", pd.to_datetime(selected_row["date"]))
+                    edit_type = st.selectbox("Νέος Τύπος", ["Έξοδο", "Έσοδο"], index=0 if selected_row["type"] == "Έξοδο" else 1)
+                    edit_amount = st.number_input("Νέο Ποσό (€)", min_value=0.0, value=float(selected_row["amount"]), format="%.2f")
+                with e_col2:
+                    categories_list = ["Σούπερ Μάρκετ", "Λογαριασμοί/Σπίτι", "Καύσιμα/Μεταφορές", "Φαγητό/Καφές", "Ψυχαγωγία", "Μισθός", "Λοιπά"]
+                    edit_cat_idx = categories_list.index(selected_row["category"]) if selected_row["category"] in categories_list else 0
+                    edit_category = st.selectbox("Νέα Κατηγορία", categories_list, index=edit_cat_idx)
+                    edit_note = st.text_input("Νέα Σημείωση", value=str(selected_row["note"]) if selected_row["note"] else "")
+
+                btn_save, btn_delete = st.columns(2)
+                with btn_save:
+                    if st.form_submit_button("💾 Αποθήκευση Διόρθωσης"):
+                        supabase.table("transactions").update(
+                            {
+                                "date": str(edit_date),
+                                "category": edit_category,
+                                "amount": float(edit_amount),
+                                "type": edit_type,
+                                "note": edit_note,
+                            }
+                        ).eq("id", selected_tx_id).execute()
+                        st.success("Η συναλλαγή ενημερώθηκε!")
+                        st.rerun()
+                with btn_delete:
+                    if st.form_submit_button("🗑️ Διαγραφή Συναλλαγής"):
+                        supabase.table("transactions").delete().eq("id", selected_tx_id).execute()
+                        st.warning("Η συναλλαγή διαγράφηκε!")
+                        st.rerun()
+        else:
+            st.info("Δεν υπάρχουν διαθέσιμες συναλλαγές για διόρθωση.")
+
+    # AI OCR RECEIPT SCANNER
+    with st.expander("📷 AI OCR Receipt Scanner (Σάρωση Απόδειξης)", expanded=False):
+        uploaded_file = st.file_uploader("Ανεβάστε φωτογραφία απόδειξης", type=["png", "jpg", "jpeg"])
+        if uploaded_file is not None:
+            image = Image.open(uploaded_file)
+            st.image(image, caption="Φορτωμένη Απόδειξη", use_container_width=True)
+            st.info("⚡ Αναγνώριση στοιχείων... (Προσυμπλήρωση φόρμας)")
 
     m1, m2 = st.columns(2)
     m1.metric("Έσοδα", f"+{income:,.2f} €")
@@ -401,7 +459,7 @@ with main_tab1:
         display_df = filtered_df.copy()
         display_df["date"] = display_df["date"].dt.strftime("%Y-%m-%d")
         st.dataframe(
-            display_df[["date", "type", "category", "amount", "note"]],
+            display_df[["id", "date", "type", "category", "amount", "note"]],
             use_container_width=True,
             hide_index=True,
         )
@@ -509,7 +567,7 @@ with main_tab7:
         ##### 1. Telegram Bot Integration
         Στείλτε μήνυμα στο Telegram: `Καφές 2.50` και θα καταχωρηθεί αυτόματα!
         
-        ##### 2. Auto-Recurring Recurring Expenses
+        ##### 2. Auto-Recurring Expenses
         Τα σταθερά σας έξοδα μπορούν να καταχωρούνται αυτόματα την 1η κάθε μήνα μέσω Supabase Database Cron Triggers.
     """
     )
