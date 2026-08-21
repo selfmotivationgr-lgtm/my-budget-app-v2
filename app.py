@@ -457,22 +457,31 @@ with main_tab1:
         )
 
 # ==========================================
-# TAB 2: CASH FLOW FORECASTING
+# TAB 2: CASH FLOW FORECASTING (FIXED DATA SOURCE)
 # ==========================================
 with main_tab2:
-    st.subheader("🔮 Cash Flow Projection")
-    try:
-        rec_data = supabase.table("recurring_expenses").select("*").execute().data
-        upcoming_recurring = sum(float(r["amount"]) for r in rec_data) if rec_data else 0.0
-    except Exception:
+    st.subheader("🔮 30-Day Cash Flow Projection")
+    st.caption("Πρόβλεψη διαθέσιμου υπολοίπου μέχρι το τέλος του μήνα με βάση τα Σταθερά Έξοδα.")
+
+    # Υπολογισμός συνολικών σταθερών εξόδων από το Session State (Tab 5)
+    if "recurring" in st.session_state and st.session_state["recurring"]:
+        upcoming_recurring = sum(float(r["amount"]) for r in st.session_state["recurring"])
+    else:
         upcoming_recurring = 0.0
 
     projected_remaining = balance - upcoming_recurring
+
     c_f1, c_f2 = st.columns(2)
-    c_f1.metric("Τρέχον Υπόλοιπο", f"{balance:,.2f} €")
-    c_f2.metric("Αναμενόμενα Σταθερά", f"-{upcoming_recurring:,.2f} €")
+    c_f1.metric("Τρέχον Υπόλοιπο (Dashboard)", f"{balance:,.2f} €")
+    c_f2.metric("Σύνολο Σταθερών Εξόδων (Tab 5)", f"-{upcoming_recurring:,.2f} €")
+
     st.markdown("---")
     st.metric("💡 Εκτιμώμενο Υπόλοιπο Τέλους Μήνα", f"{projected_remaining:,.2f} €")
+
+    if projected_remaining < 0:
+        st.error("⚠️ **Προσοχή:** Το εκτιμώμενο υπόλοιπο είναι αρνητικό! Τα σταθερά σου έξοδα ξεπερνούν το τρέχον διαθέσιμο υπόλοιπο.")
+    else:
+        st.success("✅ **Θετική πρόβλεψη:** Έχεις επαρκές υπόλοιπο για την κάλυψη των σταθερών σου υποχρεώσεων.")
 
 # ==========================================
 # TAB 3: DYNAMIC SAVINGS BUCKETS
