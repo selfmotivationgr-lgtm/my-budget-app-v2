@@ -487,27 +487,43 @@ with main_tab2:
     st.metric("💡 Εκτιμώμενο Υπόλοιπο Τέλους Μήνα", f"{projected_remaining:,.2f} €")
 
 # ==========================================
-# TAB 3: SAVINGS BUCKETS
+# TAB 3: SAVINGS BUCKETS (SAFE BOUNDS)
 # ==========================================
 with main_tab3:
     st.subheader("🎯 Multi-Goal Savings Buckets")
     st.caption("Διαχωρισμός αποταμιεύσεων σε συγκεκριμένους στόχους.")
 
     b1, b2, b3 = st.columns(3)
+
     with b1:
         st.markdown("##### 🚗 Συντήρηση Ι.Χ.")
-        b1_val = st.number_input("Υπόλοιπο (€)", value=400.0, step=50.0, key="b1")
-        st.progress(min(b1_val / 800.0, 1.0))
+        b1_val = st.number_input(
+            "Υπόλοιπο (€)", min_value=0.0, value=400.0, step=50.0, key="b1"
+        )
+        b1_target = 800.0
+        b1_progress = max(0.0, min(b1_val / b1_target, 1.0))
+        st.progress(b1_progress)
+        st.caption(f"{b1_val:,.2f} € / {b1_target:,.2f} €")
 
     with b2:
         st.markdown("##### 🏖️ Διακοπές")
-        b2_val = st.number_input("Υπόλοιπο (€)", value=1200.0, step=50.0, key="b2")
-        st.progress(min(b2_val / 1500.0, 1.0))
+        b2_val = st.number_input(
+            "Υπόλοιπο (€)", min_value=0.0, value=1200.0, step=50.0, key="b2"
+        )
+        b2_target = 1500.0
+        b2_progress = max(0.0, min(b2_val / b2_target, 1.0))
+        st.progress(b2_progress)
+        st.caption(f"{b2_val:,.2f} € / {b2_target:,.2f} €")
 
     with b3:
         st.markdown("##### 💻 Εξοπλισμός")
-        b3_val = st.number_input("Υπόλοιπο (€)", value=300.0, step=50.0, key="b3")
-        st.progress(min(b3_val / 1000.0, 1.0))
+        b3_val = st.number_input(
+            "Υπόλοιπο (€)", min_value=0.0, value=300.0, step=50.0, key="b3"
+        )
+        b3_target = 1000.0
+        b3_progress = max(0.0, min(b3_val / b3_target, 1.0))
+        st.progress(b3_progress)
+        st.caption(f"{b3_val:,.2f} € / {b3_target:,.2f} €")
 
 # ==========================================
 # TAB 4: INVESTMENTS & COMPOUND INTEREST
