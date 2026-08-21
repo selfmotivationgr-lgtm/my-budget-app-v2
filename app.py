@@ -1,4 +1,5 @@
 import os
+import calendar
 import datetime
 import pandas as pd
 import plotly.express as px
@@ -18,7 +19,7 @@ st.set_page_config(
 # --- CONSTANTS (single source of truth, was duplicated 3x before) ---
 CATEGORIES = [
     "Σούπερ Μάρκετ", "Λογαριασμοί/Σπίτι", "Καύσιμα/Μεταφορές",
-    "Φαγητό/Καφές", "Ψυχαγωγία", "Μισθός", "Λοιπά",
+    "Φαγητό/Καφές", "Ψυχαγωγία", "Μισθός", "Σταθερά Έξοδα", "Λοιπά",
 ]
 MONTH_NAMES = [
     "Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος",
@@ -611,14 +612,15 @@ with main_tab5:
 
     if "recurring" not in st.session_state:
         st.session_state["recurring"] = [
-            {"title": "Ενοίκιο", "amount": 450.0, "due_day": 1, "paid": False},
-            {"title": "Internet / Κοινόχρηστα", "amount": 35.0, "due_day": 10, "paid": False},
-            {"title": "Συνδρομές (Streaming)", "amount": 15.99, "due_day": 15, "paid": False},
+            {"title": "Ενοίκιο", "amount": 450.0, "due_day": 1, "paid": False, "tx_id": None},
+            {"title": "Internet / Κοινόχρηστα", "amount": 35.0, "due_day": 10, "paid": False, "tx_id": None},
+            {"title": "Συνδρομές (Streaming)", "amount": 15.99, "due_day": 15, "paid": False, "tx_id": None},
         ]
     else:
-        # Backfill "paid" for anyone who added recurring items before this field existed
+        # Backfill fields for anyone who added recurring items before these existed
         for item in st.session_state["recurring"]:
             item.setdefault("paid", False)
+            item.setdefault("tx_id", None)
 
     with st.expander("➕ Προσθήκη Νέου Σταθερού Εξόδου", expanded=False):
         with st.form("add_rec_form", clear_on_submit=True):
@@ -627,7 +629,7 @@ with main_tab5:
             r_day = st.number_input("Ημέρα Πληρωμής (1-31)", min_value=1, max_value=31, value=1)
             if st.form_submit_button("Προσθήκη Σταθερού") and r_title:
                 st.session_state["recurring"].append(
-                    {"title": r_title, "amount": float(r_amount), "due_day": int(r_day), "paid": False}
+                    {"title": r_title, "amount": float(r_amount), "due_day": int(r_day), "paid": False, "tx_id": None}
                 )
                 st.success(f"Προστέθηκε: {r_title}")
                 st.rerun()
@@ -646,8 +648,45 @@ with main_tab5:
             st.caption(f"Πληρωμή στις {item['due_day']} του μηνός")
             new_paid = st.checkbox("Πληρώθηκε", value=item["paid"], key=f"rec_paid_{idx}")
             if new_paid != item["paid"]:
-                st.session_state["recurring"][idx]["paid"] = new_paid
-                st.rerun()
+                if new_paid:
+                    # Checking the box = a real transaction, exactly like the manual
+                    # entry form: it lands in Supabase, shows up on the Dashboard,
+                    # in the pie/bar charts, and in the PDF export.
+                    now_local = datetime.date.today()
+                    safe_day = min(item["due_day"], calendar.monthrange(now_local.year, now_local.month)[1])
+                    tx_date = datetime.date(now_local.year, now_local.month, safe_day)
+                    try:
+                        result = (
+                            supabase.table("transactions")
+                            .insert({
+                                "date": str(tx_date),
+                                "category": "Σταθερά Έξοδα",
+                                "amount": float(item["amount"]),
+                                "type": "Έξοδο",
+                                "note": f"Σταθερό - {item['title']}",
+                            })
+                            .execute()
+                        )
+                        new_tx_id = result.data[0]["id"] if result.data else None
+                        st.session_state["recurring"][idx]["paid"] = True
+                        st.session_state["recurring"][idx]["tx_id"] = new_tx_id
+                        st.toast(f"Καταχωρήθηκε πληρωμή: {item['title']}", icon="✅")
+                        refresh_and_rerun()
+                    except Exception as e:
+                        st.error(f"Σφάλμα καταχώρησης πληρωμής: {e}")
+                else:
+                    # Unchecking = removes the transaction it created, so the
+                    # Dashboard/PDF stay in sync with what's actually ticked here.
+                    tx_id = item.get("tx_id")
+                    try:
+                        if tx_id is not None:
+                            supabase.table("transactions").delete().eq("id", tx_id).execute()
+                        st.session_state["recurring"][idx]["paid"] = False
+                        st.session_state["recurring"][idx]["tx_id"] = None
+                        st.toast(f"Ακυρώθηκε πληρωμή: {item['title']}", icon="↩️")
+                        refresh_and_rerun()
+                    except Exception as e:
+                        st.error(f"Σφάλμα ακύρωσης πληρωμής: {e}")
         with col_r2:
             new_amt = st.number_input("Ποσό (€)", min_value=0.0, value=float(item["amount"]), step=5.0, key=f"rec_amt_{idx}")
             if new_amt != item["amount"]:
@@ -661,6 +700,13 @@ with main_tab5:
         with col_r4:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🗑️", key=f"del_rec_{idx}"):
+                tx_id = item.get("tx_id")
+                try:
+                    if tx_id is not None:
+                        supabase.table("transactions").delete().eq("id", tx_id).execute()
+                        fetch_transactions.clear()
+                except Exception as e:
+                    st.error(f"Σφάλμα διαγραφής συνδεδεμένης συναλλαγής: {e}")
                 st.session_state["recurring"].pop(idx)
                 st.toast(f"Διαγράφηκε: {item['title']}", icon="🗑️")
                 st.rerun()
