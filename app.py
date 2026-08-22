@@ -1,6 +1,7 @@
 import os
 import calendar
 import datetime
+from io import BytesIO
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -310,6 +311,19 @@ def create_pdf_report(month_name, year, income, expenses, balance, df_data):
     return bytes(pdf.output())
 
 
+# --- HELPER: EXCEL EXPORT ---
+def create_excel_report(df_data: pd.DataFrame) -> bytes:
+    """Requires 'openpyxl' in requirements.txt - pandas uses it as the .xlsx writer engine."""
+    buffer = BytesIO()
+    export_df = df_data.copy()
+    export_df["date"] = pd.to_datetime(export_df["date"]).dt.strftime("%Y-%m-%d")
+    export_df = export_df[["id", "date", "type", "category", "amount", "note"]]
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        export_df.to_excel(writer, index=False, sheet_name="Συναλλαγές")
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 # --- SUPABASE CONNECTION ---
 try:
     url = st.secrets["SUPABASE_URL"]
@@ -408,6 +422,104 @@ def refresh_savings_and_rerun():
     st.rerun()
 
 
+# --- CENTRALIZED SESSION STATE DEFAULTS ---
+# Streamlit re-runs every "with tab:" block on every rerun, top to bottom in the script,
+# regardless of which tab is visually active. Previously "recurring"/"buckets"/etc. were
+# only initialized inside their own tab, so a tab appearing earlier in the script (e.g.
+# Cash Flow, which reads "recurring") would see missing state on the very first-ever load.
+# Initializing everything here, before any tab runs, removes that class of bug.
+if "recurring" not in st.session_state:
+    st.session_state["recurring"] = [
+        {"title": "Ενοίκιο", "amount": 450.0, "due_day": 1, "paid": False, "tx_id": None},
+        {"title": "Internet / Κοινόχρηστα", "amount": 35.0, "due_day": 10, "paid": False, "tx_id": None},
+        {"title": "Συνδρομές (Streaming)", "amount": 15.99, "due_day": 15, "paid": False, "tx_id": None},
+    ]
+else:
+    for _item in st.session_state["recurring"]:
+        _item.setdefault("paid", False)
+        _item.setdefault("tx_id", None)
+
+if "buckets" not in st.session_state:
+    st.session_state["buckets"] = [
+        {"name": "🚗 Συντήρηση Ι.Χ.", "current": 400.0, "target": 800.0},
+        {"name": "🏖️ Διακοπές", "current": 1200.0, "target": 1500.0},
+        {"name": "💻 Εξοπλισμός", "current": 300.0, "target": 1000.0},
+    ]
+
+if "checklist" not in st.session_state:
+    st.session_state["checklist"] = [
+        {"task": "Έλεγχος υπολοίπου τραπέζης", "done": False},
+        {"task": "Καταχώρηση αποδείξεων εβδομάδας", "done": True},
+        {"task": "Πληρωμή λογαριασμών", "done": False},
+    ]
+
+if "debts" not in st.session_state:
+    st.session_state["debts"] = {"card_balance": 1500.0, "loan_balance": 8000.0}
+
+if "category_budgets" not in st.session_state:
+    st.session_state["category_budgets"] = {}  # {category: monthly_limit}
+
+if "last_deleted" not in st.session_state:
+    st.session_state["last_deleted"] = None
+
+
+def stash_for_undo(kind: str, payload: dict) -> None:
+    """Remembers the most recently deleted record so it can be restored with one click
+    from the sidebar. Single-level undo (only the latest deletion) - simple and covers
+    the common "oops" case without the complexity of a full undo stack."""
+    st.session_state["last_deleted"] = {"kind": kind, "payload": payload}
+
+
+def undo_last_delete() -> None:
+    ld = st.session_state.get("last_deleted")
+    if not ld:
+        return
+    kind, payload = ld["kind"], ld["payload"]
+    try:
+        if kind == "transaction":
+            supabase.table("transactions").insert(payload).execute()
+            fetch_transactions.clear()
+        elif kind == "saving":
+            supabase.table("savings").insert(payload).execute()
+            fetch_savings.clear()
+        elif kind == "bucket":
+            st.session_state["buckets"].insert(payload["idx"], payload["item"])
+        elif kind == "recurring":
+            st.session_state["recurring"].insert(payload["idx"], payload["item"])
+        elif kind == "checklist":
+            st.session_state["checklist"].insert(payload["idx"], payload["item"])
+        st.session_state["last_deleted"] = None
+        st.toast("Η διαγραφή αναιρέθηκε.", icon="↩️")
+        st.rerun()
+    except Exception as e:
+        st.error(f"Σφάλμα αναίρεσης: {e}")
+
+
+def detect_recurring_candidates(tx_df: pd.DataFrame, existing_recurring: list) -> list:
+    """Heuristic: an expense category+amount combo that shows up in 2+ distinct months
+    is very likely a recurring bill, so it's surfaced as a one-click suggestion instead
+    of asking the user to notice and re-type it into the Σταθερά tab themselves."""
+    if tx_df.empty:
+        return []
+    exp = tx_df[tx_df["type"] == "Έξοδο"].copy()
+    if exp.empty:
+        return []
+    exp["year_month"] = exp["date"].dt.to_period("M")
+    exp["amount_r"] = exp["amount"].round(2)
+    existing_titles = {r["title"].strip().lower() for r in existing_recurring}
+    candidates = []
+    for (cat, amt), g in exp.groupby(["category", "amount_r"]):
+        months = g["year_month"].nunique()
+        if months >= 2 and len(g) >= 2 and cat.strip().lower() not in existing_titles:
+            avg_day = int(round(g["date"].dt.day.mean()))
+            candidates.append({
+                "title": cat, "amount": float(amt),
+                "due_day": max(1, min(avg_day, 28)), "occurrences": int(months),
+            })
+    candidates.sort(key=lambda c: -c["occurrences"])
+    return candidates
+
+
 # --- SIDEBAR FILTERS ---
 st.sidebar.header("🗓️ Περίοδος & Στόχοι")
 now = datetime.datetime.now()
@@ -421,6 +533,26 @@ selected_month = MONTH_NAMES.index(selected_month_name) + 1
 
 monthly_budget = st.sidebar.number_input("Μηνιαίο Όριο (€)", min_value=0.0, value=1200.0, step=50.0)
 
+with st.sidebar.expander("🎯 Προϋπολογισμοί ανά Κατηγορία"):
+    st.caption("Βάλε 0 για να απενεργοποιήσεις το όριο μιας κατηγορίας.")
+    for _cat in CATEGORIES:
+        _current = st.session_state["category_budgets"].get(_cat, 0.0)
+        _new = st.number_input(_cat, min_value=0.0, value=_current, step=10.0, key=f"catbudget_{_cat}")
+        if _new != _current:
+            if _new > 0:
+                st.session_state["category_budgets"][_cat] = _new
+            else:
+                st.session_state["category_budgets"].pop(_cat, None)
+
+if st.session_state.get("last_deleted"):
+    _kind_labels = {
+        "transaction": "συναλλαγή", "saving": "κίνηση αποταμίευσης",
+        "bucket": "στόχο αποταμίευσης", "recurring": "σταθερό έξοδο", "checklist": "εργασία",
+    }
+    _kind = st.session_state["last_deleted"]["kind"]
+    if st.sidebar.button(f"↩️ Αναίρεση διαγραφής ({_kind_labels.get(_kind, _kind)})", use_container_width=True):
+        undo_last_delete()
+
 if st.sidebar.button("🔒 Αποσύνδεση"):
     st.session_state["authenticated"] = False
     st.rerun()
@@ -432,7 +564,7 @@ if st.sidebar.button("🔒 Αποσύνδεση"):
 ) = st.tabs(
     [
         "👛 Dashboard", "🧭 Cash Flow", "🎯 Buckets", "📊 Ετήσια", "💰 Αποταμίευση",
-        "⚙️ Σταθερά", "📋 Checklist", "🏦 Δάνεια", "📄 PDF",
+        "⚙️ Σταθερά", "📋 Checklist", "🏦 Δάνεια", "📄 Εξαγωγή",
     ]
 )
 
@@ -547,8 +679,16 @@ with main_tab1:
                 with btn_delete:
                     if st.form_submit_button("🗑️ Διαγραφή"):
                         try:
+                            undo_payload = {
+                                "date": str(pd.to_datetime(selected_row["date"]).date()),
+                                "category": selected_row["category"],
+                                "amount": float(selected_row["amount"]),
+                                "type": selected_row["type"],
+                                "note": selected_row["note"] if pd.notna(selected_row["note"]) else "",
+                            }
                             supabase.table("transactions").delete().eq("id", selected_tx_id).execute()
-                            st.warning("Διαγράφηκε!")
+                            stash_for_undo("transaction", undo_payload)
+                            st.warning("Διαγράφηκε! (Αναίρεση διαθέσιμη από το sidebar)")
                             refresh_and_rerun()
                         except Exception as e:
                             st.error(f"Σφάλμα διαγραφής: {e}")
@@ -590,44 +730,132 @@ with main_tab1:
                 st.plotly_chart(fig_pie, use_container_width=True)
 
         st.subheader("📜 Συναλλαγές")
+        dash_search = st.text_input("🔎 Αναζήτηση (κατηγορία ή σημείωση)", key="dash_search")
         display_df = filtered_df.copy()
+        if dash_search:
+            _mask = (
+                display_df["category"].str.contains(dash_search, case=False, na=False)
+                | display_df["note"].astype(str).str.contains(dash_search, case=False, na=False)
+            )
+            display_df = display_df[_mask]
         display_df["date"] = display_df["date"].dt.strftime("%Y-%m-%d")
         st.dataframe(
             display_df[["id", "date", "type", "category", "amount", "note"]],
             use_container_width=True, hide_index=True,
         )
 
+    # --- PER-CATEGORY BUDGETS ---
+    active_budgets = {c: v for c, v in st.session_state.get("category_budgets", {}).items() if v > 0}
+    if active_budgets:
+        st.markdown("---")
+        st.subheader("🎯 Προϋπολογισμοί ανά Κατηγορία")
+        exp_by_cat = (
+            filtered_df[filtered_df["type"] == "Έξοδο"].groupby("category")["amount"].sum()
+            if not filtered_df.empty else pd.Series(dtype=float)
+        )
+        for cat, limit in active_budgets.items():
+            spent = float(exp_by_cat.get(cat, 0.0))
+            ratio = min(spent / limit, 1.0) if limit else 0.0
+            st.caption(f"{cat}: {spent:,.2f} € / {limit:,.2f} €")
+            st.progress(ratio)
+            if spent > limit:
+                st.warning(f"🚨 Υπέρβαση ορίου στην κατηγορία «{cat}» ({spent:,.2f} € / {limit:,.2f} €)")
+
+    # --- ANOMALY DETECTION: flag categories spending well above their historical average ---
+    if not df.empty:
+        exp_all = df[df["type"] == "Έξοδο"].copy()
+        if not exp_all.empty:
+            exp_all["year_month"] = exp_all["date"].dt.to_period("M")
+            current_period = pd.Period(year=selected_year, month=selected_month, freq="M")
+            hist = exp_all[exp_all["year_month"] != current_period]
+            if not hist.empty:
+                months_seen = hist["year_month"].nunique()
+                hist_avg = hist.groupby("category")["amount"].sum() / months_seen
+                cur_spend = exp_all.loc[exp_all["year_month"] == current_period].groupby("category")["amount"].sum()
+                anomalies = []
+                for cat, cur_amt in cur_spend.items():
+                    avg_amt = float(hist_avg.get(cat, 0.0))
+                    # Ignore tiny amounts so a €3 vs €1 comparison doesn't get flagged as "3x"
+                    if avg_amt > 0 and cur_amt >= avg_amt * 1.5 and (cur_amt - avg_amt) >= 10:
+                        anomalies.append((cat, cur_amt / avg_amt, float(cur_amt), avg_amt))
+                if anomalies:
+                    st.markdown("---")
+                    st.subheader("🔍 Ασυνήθιστα Έξοδα")
+                    for cat, ratio, cur_amt, avg_amt in sorted(anomalies, key=lambda x: -x[1]):
+                        st.warning(
+                            f"Ξόδεψες **{ratio:.1f}x** πάνω από τον μέσο όρο σε «{cat}» αυτόν τον μήνα "
+                            f"({cur_amt:,.2f} € έναντι μέσου όρου {avg_amt:,.2f} €/μήνα)."
+                        )
+
 # ==========================================
-# TAB 2: CASH FLOW FORECASTING
+# TAB 2: CASH FLOW FORECASTING (+ NET WORTH)
 # ==========================================
 with main_tab2:
-    clay_header("🧭", "Cash Flow Projection", "Πρόβλεψη υπολοίπου βάσει σταθερών εξόδων", accent="purple")
+    clay_header("🧭", "Cash Flow Projection", "Πρόβλεψη βάσει ιστορικού μοτίβου + ανεξόφλητων σταθερών", accent="purple")
 
-    upcoming_recurring = (
-        sum(float(r["amount"]) for r in st.session_state["recurring"])
-        if "recurring" in st.session_state and st.session_state["recurring"]
-        else 0.0
+    upcoming_recurring_unpaid = sum(
+        float(r["amount"]) for r in st.session_state["recurring"] if not r.get("paid", False)
     )
 
-    projected_remaining = balance - upcoming_recurring
-    c_f1, c_f2 = st.columns(2)
-    c_f1.metric("Τρέχον Υπόλοιπο (Dashboard)", f"{balance:,.2f} €")
-    c_f2.metric("Σύνολο Σταθερών Εξόδων (Tab 5)", f"-{upcoming_recurring:,.2f} €")
+    # Historical-pattern forecast: extrapolate the rest of the month from how much you've
+    # actually been spending per day so far, instead of just subtracting fixed bills.
+    today = datetime.date.today()
+    days_in_month = calendar.monthrange(selected_year, selected_month)[1]
+    if selected_year == today.year and selected_month == today.month:
+        days_elapsed = today.day
+    else:
+        days_elapsed = days_in_month  # a past/future month: nothing left to "extrapolate"
+    days_remaining = max(days_in_month - days_elapsed, 0)
+
+    daily_avg_expense = (expenses / days_elapsed) if days_elapsed > 0 else 0.0
+    projected_additional_expenses = daily_avg_expense * days_remaining
+    projected_balance = balance - upcoming_recurring_unpaid - projected_additional_expenses
+
+    c_f1, c_f2, c_f3 = st.columns(3)
+    c_f1.metric("Τρέχον Υπόλοιπο (μήνα)", f"{balance:,.2f} €")
+    c_f2.metric("Ανεξόφλητα Σταθερά", f"-{upcoming_recurring_unpaid:,.2f} €")
+    c_f3.metric("Αναμενόμενα Έξοδα (υπόλοιπες μέρες)", f"-{projected_additional_expenses:,.2f} €")
     st.markdown("---")
-    st.metric("💡 Εκτιμώμενο Υπόλοιπο Τέλους Μήνα", f"{projected_remaining:,.2f} €")
+    st.metric("💡 Εκτιμώμενο Υπόλοιπο Τέλους Μήνα", f"{projected_balance:,.2f} €")
+    st.caption(
+        f"Βάσει μέσου ημερήσιου εξόδου {daily_avg_expense:,.2f} €/ημέρα · {days_remaining} ημέρες απομένουν στον μήνα."
+    )
+
+    st.markdown("---")
+    clay_header("💎", "Καθαρή Θέση (Net Worth)", "Ό,τι έχεις μείον ό,τι χρωστάς, σε μία ματιά", accent="gold")
+
+    checking_balance_all_time = (
+        df.loc[df["type"] == "Έσοδο", "amount"].sum() - df.loc[df["type"] == "Έξοδο", "amount"].sum()
+        if not df.empty else 0.0
+    )
+    savings_total = (
+        savings_df.loc[savings_df["type"] == "Κατάθεση", "amount"].sum()
+        - savings_df.loc[savings_df["type"] == "Ανάληψη", "amount"].sum()
+        if not savings_df.empty else 0.0
+    )
+    buckets_total = sum(b["current"] for b in st.session_state.get("buckets", []))
+    total_debt = st.session_state["debts"]["card_balance"] + st.session_state["debts"]["loan_balance"]
+    net_worth = checking_balance_all_time + savings_total + buckets_total - total_debt
+
+    nw1, nw2, nw3, nw4 = st.columns(4)
+    nw1.metric("Λογαριασμός", f"{checking_balance_all_time:,.2f} €")
+    nw2.metric("Αποταμίευση", f"{savings_total:,.2f} €")
+    nw3.metric("Buckets", f"{buckets_total:,.2f} €")
+    nw4.metric("Χρέη", f"-{total_debt:,.2f} €")
+    st.markdown("---")
+    st.markdown(
+        f'<div class="hero-container">'
+        f'<div class="hero-label">Καθαρή Θέση (Net Worth)</div>'
+        f'<div class="hero-amount">{net_worth:,.2f} €</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 # ==========================================
 # TAB 3: DYNAMIC SAVINGS BUCKETS
 # ==========================================
 with main_tab3:
     clay_header("🎯", "Multi-Goal Savings Buckets", "Διαχειριστείτε δυναμικά τους αποταμιευτικούς σας στόχους", accent="green")
-
-    if "buckets" not in st.session_state:
-        st.session_state["buckets"] = [
-            {"name": "🚗 Συντήρηση Ι.Χ.", "current": 400.0, "target": 800.0},
-            {"name": "🏖️ Διακοπές", "current": 1200.0, "target": 1500.0},
-            {"name": "💻 Εξοπλισμός", "current": 300.0, "target": 1000.0},
-        ]
 
     with st.expander("➕ Προσθήκη Νέου Στόχου / Bucket", expanded=False):
         with st.form("add_bucket_form", clear_on_submit=True):
@@ -656,6 +884,7 @@ with main_tab3:
         with col_b3:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🗑️", key=f"del_b_{idx}"):
+                stash_for_undo("bucket", {"idx": idx, "item": dict(st.session_state["buckets"][idx])})
                 st.session_state["buckets"].pop(idx)
                 st.rerun()
         st.markdown("---")
@@ -775,8 +1004,15 @@ with main_tab_savings:
                 with sv_btn_delete:
                     if st.form_submit_button("🗑️ Διαγραφή"):
                         try:
+                            undo_payload = {
+                                "date": str(pd.to_datetime(sv_selected_row["date"]).date()),
+                                "type": sv_selected_row["type"],
+                                "amount": float(sv_selected_row["amount"]),
+                                "note": sv_selected_row["note"] if pd.notna(sv_selected_row["note"]) else "",
+                            }
                             supabase.table("savings").delete().eq("id", sv_selected_id).execute()
-                            st.warning("Διαγράφηκε!")
+                            stash_for_undo("saving", undo_payload)
+                            st.warning("Διαγράφηκε! (Αναίρεση διαθέσιμη από το sidebar)")
                             refresh_savings_and_rerun()
                         except Exception as e:
                             st.error(f"Σφάλμα διαγραφής: {e}")
@@ -817,18 +1053,6 @@ with main_tab_savings:
 with main_tab5:
     clay_header("⚙️", "Σταθερά Έξοδα (Recurring)", "Πλήρως παραμετροποιήσιμη διαχείριση πάγιων υποχρεώσεων", accent="blue")
 
-    if "recurring" not in st.session_state:
-        st.session_state["recurring"] = [
-            {"title": "Ενοίκιο", "amount": 450.0, "due_day": 1, "paid": False, "tx_id": None},
-            {"title": "Internet / Κοινόχρηστα", "amount": 35.0, "due_day": 10, "paid": False, "tx_id": None},
-            {"title": "Συνδρομές (Streaming)", "amount": 15.99, "due_day": 15, "paid": False, "tx_id": None},
-        ]
-    else:
-        # Backfill fields for anyone who added recurring items before these existed
-        for item in st.session_state["recurring"]:
-            item.setdefault("paid", False)
-            item.setdefault("tx_id", None)
-
     with st.expander("➕ Προσθήκη Νέου Σταθερού Εξόδου", expanded=False):
         with st.form("add_rec_form", clear_on_submit=True):
             r_title = st.text_input("Τίτλος Εξόδου")
@@ -840,6 +1064,27 @@ with main_tab5:
                 )
                 st.success(f"Προστέθηκε: {r_title}")
                 st.rerun()
+
+    recurring_suggestions = detect_recurring_candidates(df, st.session_state["recurring"])
+    if recurring_suggestions:
+        st.markdown("---")
+        st.subheader("🤖 Προτάσεις Αυτόματης Ανίχνευσης")
+        st.caption("Βρέθηκαν έξοδα που επαναλαμβάνονται σταθερά μήνα με μήνα στο ιστορικό σου.")
+        for s_idx, cand in enumerate(recurring_suggestions):
+            sug_col1, sug_col2 = st.columns([4, 1])
+            with sug_col1:
+                st.markdown(
+                    f"**{cand['title']}** — {cand['amount']:,.2f} €, ~{cand['occurrences']} μήνες, "
+                    f"συνήθως γύρω στις {cand['due_day']} του μηνός"
+                )
+            with sug_col2:
+                if st.button("➕ Προσθήκη", key=f"add_suggestion_{s_idx}", use_container_width=True):
+                    st.session_state["recurring"].append({
+                        "title": cand["title"], "amount": cand["amount"], "due_day": cand["due_day"],
+                        "paid": False, "tx_id": None,
+                    })
+                    st.success(f"Προστέθηκε ως σταθερό: {cand['title']}")
+                    st.rerun()
 
     st.markdown("---")
 
@@ -914,6 +1159,7 @@ with main_tab5:
                         fetch_transactions.clear()
                 except Exception as e:
                     st.error(f"Σφάλμα διαγραφής συνδεδεμένης συναλλαγής: {e}")
+                stash_for_undo("recurring", {"idx": idx, "item": dict(item)})
                 st.session_state["recurring"].pop(idx)
                 st.toast(f"Διαγράφηκε: {item['title']}", icon="🗑️")
                 st.rerun()
@@ -924,13 +1170,6 @@ with main_tab5:
 # ==========================================
 with main_tab6:
     clay_header("📋", "Εβδομαδιαίο Checklist", "Προσθέστε, τσεκάρετε ή διαγράψτε εργασίες", accent="purple")
-
-    if "checklist" not in st.session_state:
-        st.session_state["checklist"] = [
-            {"task": "Έλεγχος υπολοίπου τραπέζης", "done": False},
-            {"task": "Καταχώρηση αποδείξεων εβδομάδας", "done": True},
-            {"task": "Πληρωμή λογαριασμών", "done": False},
-        ]
 
     new_task = st.text_input("➕ Νέα Εργασία Checklist")
     if st.button("Προσθήκη Εργασίας") and new_task:
@@ -944,6 +1183,7 @@ with main_tab6:
             st.session_state["checklist"][idx]["done"] = st.checkbox(item["task"], value=item["done"], key=f"chk_{idx}")
         with c_col2:
             if st.button("🗑️", key=f"del_chk_{idx}"):
+                stash_for_undo("checklist", {"idx": idx, "item": dict(st.session_state["checklist"][idx])})
                 st.session_state["checklist"].pop(idx)
                 st.rerun()
 
@@ -952,24 +1192,105 @@ with main_tab6:
 # ==========================================
 with main_tab7:
     clay_header("🏦", "Δάνεια & Πιστωτικές", accent="red")
-    card_balance = st.number_input("Υπόλοιπο Πιστωτικών (€)", min_value=0.0, value=1500.0)
-    loan_balance = st.number_input("Υπόλοιπο Δανείων (€)", min_value=0.0, value=8000.0)
+    card_balance = st.number_input(
+        "Υπόλοιπο Πιστωτικών (€)", min_value=0.0, value=st.session_state["debts"]["card_balance"], key="debt_card"
+    )
+    loan_balance = st.number_input(
+        "Υπόλοιπο Δανείων (€)", min_value=0.0, value=st.session_state["debts"]["loan_balance"], key="debt_loan"
+    )
+    if (
+        card_balance != st.session_state["debts"]["card_balance"]
+        or loan_balance != st.session_state["debts"]["loan_balance"]
+    ):
+        st.session_state["debts"]["card_balance"] = card_balance
+        st.session_state["debts"]["loan_balance"] = loan_balance
     st.metric("Συνολικό Χρέος", f"{card_balance + loan_balance:,.2f} €")
 
 # ==========================================
-# TAB 8: PDF STATEMENT
+# TAB 8: EXPORT (PDF + EXCEL, MONTHLY OR CUSTOM RANGE)
 # ==========================================
 with main_tab8:
-    clay_header("📄", "Εξαγωγή PDF Statement", accent="gold")
-    if not filtered_df.empty:
-        try:
-            pdf_bytes = create_pdf_report(selected_month_name, selected_year, income, expenses, balance, filtered_df)
-            st.download_button(
-                label=f"📥 Λήψη PDF Αναφοράς ({selected_month_name} {selected_year})",
-                data=pdf_bytes, file_name=f"statement_{selected_year}_{selected_month:02d}.pdf",
-                mime="application/pdf", use_container_width=True,
-            )
-        except Exception as e:
-            st.error(f"Σφάλμα δημιουργίας PDF: {e}")
+    clay_header("📄", "Εξαγωγή Αναφορών", "PDF & Excel, για τον επιλεγμένο μήνα ή προσαρμοσμένο εύρος", accent="gold")
+
+    range_mode = st.radio(
+        "Περίοδος Αναφοράς",
+        ["Επιλεγμένος μήνας (sidebar)", "Προσαρμοσμένο εύρος ημερομηνιών"],
+        horizontal=True,
+    )
+
+    if range_mode == "Επιλεγμένος μήνας (sidebar)":
+        export_df = filtered_df.copy() if not filtered_df.empty else pd.DataFrame()
+        export_label = f"{selected_year}_{selected_month:02d}"
+        export_income, export_expenses, export_balance = income, expenses, balance
+        report_month_title, report_year_title = selected_month_name, selected_year
     else:
-        st.info("Δεν υπάρχουν συναλλαγές για την παραγωγή PDF.")
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            range_start = st.date_input("Από", datetime.date.today().replace(day=1), key="export_range_start")
+        with rc2:
+            range_end = st.date_input("Έως", datetime.date.today(), key="export_range_end")
+
+        if range_start > range_end:
+            st.error("Η ημερομηνία 'Από' δεν μπορεί να είναι μετά την 'Έως'.")
+            export_df = pd.DataFrame()
+        elif not df.empty:
+            _mask = (df["date"].dt.date >= range_start) & (df["date"].dt.date <= range_end)
+            export_df = df[_mask].copy()
+        else:
+            export_df = pd.DataFrame()
+
+        export_income = export_df.loc[export_df["type"] == "Έσοδο", "amount"].sum() if not export_df.empty else 0.0
+        export_expenses = export_df.loc[export_df["type"] == "Έξοδο", "amount"].sum() if not export_df.empty else 0.0
+        export_balance = export_income - export_expenses
+        export_label = f"{range_start}_{range_end}"
+        report_month_title, report_year_title = f"{range_start} έως {range_end}", ""
+
+    export_search = st.text_input("🔎 Αναζήτηση (κατηγορία ή σημείωση)", key="export_search")
+    if export_search and not export_df.empty:
+        _mask = (
+            export_df["category"].str.contains(export_search, case=False, na=False)
+            | export_df["note"].astype(str).str.contains(export_search, case=False, na=False)
+        )
+        export_df = export_df[_mask]
+
+    if not export_df.empty:
+        e_m1, e_m2, e_m3 = st.columns(3)
+        e_m1.metric("Έσοδα", f"+{export_income:,.2f} €")
+        e_m2.metric("Έξοδα", f"-{export_expenses:,.2f} €")
+        e_m3.metric("Καθαρό", f"{export_balance:,.2f} €")
+
+        dl_col1, dl_col2 = st.columns(2)
+        with dl_col1:
+            try:
+                pdf_bytes = create_pdf_report(
+                    report_month_title, report_year_title, export_income, export_expenses, export_balance, export_df
+                )
+                st.download_button(
+                    "📥 Λήψη PDF", data=pdf_bytes,
+                    file_name=f"statement_{export_label}.pdf", mime="application/pdf",
+                    use_container_width=True,
+                )
+            except Exception as e:
+                st.error(f"Σφάλμα δημιουργίας PDF: {e}")
+        with dl_col2:
+            try:
+                excel_bytes = create_excel_report(export_df)
+                st.download_button(
+                    "📊 Λήψη Excel", data=excel_bytes,
+                    file_name=f"statement_{export_label}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+            except Exception as e:
+                st.error(f"Σφάλμα δημιουργίας Excel: {e}")
+
+        st.markdown("---")
+        st.subheader("📜 Προεπισκόπηση")
+        preview_df = export_df.copy()
+        preview_df["date"] = pd.to_datetime(preview_df["date"]).dt.strftime("%Y-%m-%d")
+        st.dataframe(
+            preview_df[["id", "date", "type", "category", "amount", "note"]],
+            use_container_width=True, hide_index=True,
+        )
+    else:
+        st.info("Δεν υπάρχουν συναλλαγές για την επιλεγμένη περίοδο/αναζήτηση.")
