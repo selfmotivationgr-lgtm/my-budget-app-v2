@@ -124,6 +124,67 @@ st.markdown(
 
     .clay-title { font-size: 19px; font-weight: 800; letter-spacing: -0.3px; color: #fff; }
     .clay-subtitle { font-size: 12.5px; color: #8e94a5; margin-top: 2px; }
+
+    /* --- FORCE DARK, READABLE INPUT WIDGETS ON EVERY DEVICE ---
+       Without this, Streamlit's BaseWeb widgets fall back to the device's own
+       light/dark preference. Desktop browsers were often in dark mode (so it
+       looked fine "by accident"), but mobile browsers default to light mode,
+       producing gray/white text on a white or near-white input background. */
+
+    /* Text / number inputs */
+    .stTextInput input, .stNumberInput input, .stDateInput input, .stTextArea textarea {
+        background-color: #161a24 !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(255,255,255,0.14) !important;
+        border-radius: 12px !important;
+        -webkit-text-fill-color: #ffffff !important;
+    }
+    .stTextInput input::placeholder, .stNumberInput input::placeholder, .stTextArea textarea::placeholder {
+        color: #8e94a5 !important;
+        opacity: 1 !important;
+    }
+    /* Number input +/- step buttons */
+    button[data-testid="stNumberInputStepUp"], button[data-testid="stNumberInputStepDown"] {
+        background-color: #161a24 !important;
+        border-color: rgba(255,255,255,0.14) !important;
+    }
+    button[data-testid="stNumberInputStepUp"] svg, button[data-testid="stNumberInputStepDown"] svg {
+        fill: #ffffff !important;
+    }
+
+    /* Selectbox (closed state) */
+    div[data-baseweb="select"] > div {
+        background-color: #161a24 !important;
+        border-color: rgba(255,255,255,0.14) !important;
+        color: #ffffff !important;
+    }
+    div[data-baseweb="select"] span, div[data-baseweb="select"] div {
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
+    }
+    div[data-baseweb="select"] svg { fill: #ffffff !important; }
+
+    /* Selectbox / dropdown menu popover (renders in a portal, needs its own rule) */
+    ul[data-baseweb="menu"], div[data-baseweb="popover"] {
+        background-color: #161a24 !important;
+    }
+    li[role="option"] { color: #ffffff !important; background-color: transparent !important; }
+    li[role="option"]:hover, li[aria-selected="true"] { background-color: rgba(255,255,255,0.10) !important; }
+
+    /* Date picker calendar popover */
+    div[data-baseweb="calendar"], div[data-baseweb="calendar"] * {
+        background-color: #161a24 !important;
+        color: #ffffff !important;
+    }
+
+    /* Labels above every widget */
+    .stTextInput label, .stNumberInput label, .stSelectbox label,
+    .stDateInput label, .stTextArea label, .stCheckbox label p {
+        color: #c7cad1 !important;
+    }
+
+    /* Checkbox text + box */
+    .stCheckbox p { color: #ffffff !important; }
     </style>
 """,
     unsafe_allow_html=True,
