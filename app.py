@@ -306,59 +306,72 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 
-# --- CACHED DATA FETCHERS ---
+# --- CACHED DATA FETCHERS (WITH SAFE FALLBACKS) ---
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_transactions():
-    return supabase.table("transactions").select("*").order("date", desc=True).execute().data
+    try:
+        return supabase.table("transactions").select("*").order("date", desc=True).execute().data
+    except Exception:
+        return []
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_savings():
-    return supabase.table("savings").select("*").order("date", desc=True).execute().data
+    try:
+        return supabase.table("savings").select("*").order("date", desc=True).execute().data
+    except Exception:
+        return []
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_buckets():
-    return supabase.table("buckets").select("*").order("id").execute().data
+    try:
+        return supabase.table("buckets").select("*").order("id").execute().data
+    except Exception:
+        return []
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_recurring():
-    return supabase.table("recurring_expenses").select("*").order("id").execute().data
+    try:
+        return supabase.table("recurring_expenses").select("*").order("id").execute().data
+    except Exception:
+        return []
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_checklist():
-    return supabase.table("checklist_items").select("*").order("id").execute().data
+    try:
+        return supabase.table("checklist_items").select("*").order("id").execute().data
+    except Exception:
+        return []
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_debts():
-    data = supabase.table("debts").select("*").eq("id", 1).execute().data
-    return data[0] if data else {"card_balance": 0.0, "loan_balance": 0.0}
+    try:
+        data = supabase.table("debts").select("*").eq("id", 1).execute().data
+        return data[0] if data else {"card_balance": 0.0, "loan_balance": 0.0}
+    except Exception:
+        return {"card_balance": 0.0, "loan_balance": 0.0}
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_category_budgets():
-    return supabase.table("category_budgets").select("*").execute().data
+    try:
+        return supabase.table("category_budgets").select("*").execute().data
+    except Exception:
+        return []
 
 
-try:
-    data = fetch_transactions()
-    df = pd.DataFrame(data) if data else pd.DataFrame()
-    if not df.empty: df["date"] = pd.to_datetime(df["date"])
-except Exception as err:
-    st.error(f"🔍 Σφάλμα Supabase (Transactions): {err}")
-    df = pd.DataFrame()
+data = fetch_transactions() or []
+df = pd.DataFrame(data) if data else pd.DataFrame()
+if not df.empty: df["date"] = pd.to_datetime(df["date"])
 
-try:
-    savings_data = fetch_savings()
-    savings_df = pd.DataFrame(savings_data) if savings_data else pd.DataFrame()
-    if not savings_df.empty: savings_df["date"] = pd.to_datetime(savings_df["date"])
-except Exception as err:
-    st.error(f"🔍 Σφάλμα Supabase (Savings): {err}")
-    savings_df = pd.DataFrame()
+savings_data = fetch_savings() or []
+savings_df = pd.DataFrame(savings_data) if savings_data else pd.DataFrame()
+if not savings_df.empty: savings_df["date"] = pd.to_datetime(savings_df["date"])
 
 buckets_data = fetch_buckets() or []
 recurring_data = fetch_recurring() or []
 checklist_data = fetch_checklist() or []
 debts_data = fetch_debts()
 _budget_rows = fetch_category_budgets() or []
-category_budgets = {row["category"]: float(row["monthly_limit"]) for row in _budget_rows}
+category_budgets = {row["category"]: float(row["monthly_limit"]) for row in _budget_rows if "category" in row}
 
 
 def refresh_table_and_rerun(*cache_fns) -> None:
@@ -406,7 +419,10 @@ def detect_recurring_candidates(tx_df: pd.DataFrame, existing_recurring: list) -
     if exp.empty: return []
     exp["year_month"] = exp["date"].dt.to_period("M")
     exp["amount_r"] = exp["amount"].round(2)
-    existing_titles = {r["title"].strip().lower() for r in existing_recurring}
+    existing_titles = {
+        str(r.get("title", r.get("name", ""))).strip().lower() 
+        for r in existing_recurring if isinstance(r, dict)
+    }
     candidates = []
     for (cat, amt), g in exp.groupby(["category", "amount_r"]):
         months = g["year_month"].nunique()
@@ -597,7 +613,7 @@ with main_tab1:
 with main_tab2:
     clay_header("🧭", "Cash Flow Projection", "Πρόβλεψη βάσει ιστορικού μοτίβου + ανεξόφλητων σταθερών", accent="purple")
 
-    upcoming_recurring_unpaid = sum(float(r["amount"]) for r in recurring_data if not r.get("paid", False))
+    upcoming_recurring_unpaid = sum(float(r.get("amount", 0)) for r in recurring_data if not r.get("paid", False))
 
     today = datetime.date.today()
     days_in_month = calendar.monthrange(selected_year, selected_month)[1]
@@ -620,8 +636,8 @@ with main_tab2:
 
     checking_balance_all_time = (df.loc[df["type"] == "Έσοδο", "amount"].sum() - df.loc[df["type"] == "Έξοδο", "amount"].sum()) if not df.empty else 0.0
     savings_total = (savings_df.loc[savings_df["type"] == "Κατάθεση", "amount"].sum() - savings_df.loc[savings_df["type"] == "Ανάληψη", "amount"].sum()) if not savings_df.empty else 0.0
-    buckets_total = sum(b.get("current", 0.0) for b in buckets_data)
-    total_debt = debts_data.get("card_balance", 0.0) + debts_data.get("loan_balance", 0.0)
+    buckets_total = sum(float(b.get("current", 0.0)) for b in buckets_data)
+    total_debt = float(debts_data.get("card_balance", 0.0)) + float(debts_data.get("loan_balance", 0.0))
     net_worth = checking_balance_all_time + savings_total + buckets_total - total_debt
 
     nw1, nw2, nw3, nw4 = st.columns(4)
@@ -654,16 +670,20 @@ with main_tab3:
     st.markdown("---")
 
     for bucket in buckets_data:
-        b_id = bucket["id"]
+        b_id = bucket.get("id")
+        b_name = bucket.get("name", "Στόχος")
+        b_current = float(bucket.get("current", 0.0))
+        b_target = float(bucket.get("target", 1.0))
+        
         col_b1, col_b2, col_b3 = st.columns([3, 2, 1])
         with col_b1:
-            st.markdown(f"##### {bucket['name']}")
-            b_ratio = max(0.0, min(bucket["current"] / bucket["target"], 1.0)) if bucket.get("target") else 0.0
+            st.markdown(f"##### {b_name}")
+            b_ratio = max(0.0, min(b_current / b_target, 1.0)) if b_target > 0 else 0.0
             st.progress(b_ratio)
-            st.caption(f"{bucket['current']:,.2f} € / {bucket['target']:,.2f} € ({b_ratio*100:.1f}%)")
+            st.caption(f"{b_current:,.2f} € / {b_target:,.2f} € ({b_ratio*100:.1f}%)")
         with col_b2:
-            new_val = st.number_input("Νέο Υπόλοιπο (€)", min_value=0.0, value=float(bucket["current"]), key=f"b_val_{b_id}")
-            if new_val != bucket["current"]:
+            new_val = st.number_input("Νέο Υπόλοιπο (€)", min_value=0.0, value=b_current, key=f"b_val_{b_id}")
+            if new_val != b_current:
                 try:
                     supabase.table("buckets").update({"current": float(new_val)}).eq("id", b_id).execute()
                     refresh_table_and_rerun(fetch_buckets)
@@ -673,7 +693,7 @@ with main_tab3:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🗑️", key=f"del_b_{b_id}"):
                 try:
-                    undo_payload = {"name": bucket["name"], "current": bucket["current"], "target": bucket["target"]}
+                    undo_payload = {"name": b_name, "current": b_current, "target": b_target}
                     supabase.table("buckets").delete().eq("id", b_id).execute()
                     stash_for_undo("bucket", undo_payload)
                     refresh_table_and_rerun(fetch_buckets)
@@ -777,23 +797,27 @@ with main_tab5:
                         st.error(f"Σφάλμα προσθήκης πρότασης: {e}")
 
     st.markdown("---")
-    total_rec = sum(float(item["amount"]) for item in recurring_data)
+    total_rec = sum(float(item.get("amount", 0)) for item in recurring_data)
     st.markdown(f"##### 📌 Συνολικά Σταθερά Έξοδα: **{total_rec:,.2f} €/μήνα**")
 
     for item in recurring_data:
-        r_id = item["id"]
+        r_id = item.get("id")
+        r_title = item.get("title", item.get("name", "Σταθερό Έξοδο"))
+        r_amount = float(item.get("amount", 0.0))
+        r_day = int(item.get("due_day", 1))
+
         col_r1, col_r2, col_r3, col_r4 = st.columns([3, 2, 2, 1])
         with col_r1:
-            st.markdown(f"**{item['title']}**")
-            st.caption(f"Πληρωμή στις {item['due_day']} του μηνός")
+            st.markdown(f"**{r_title}**")
+            st.caption(f"Πληρωμή στις {r_day} του μηνός")
             new_paid = st.checkbox("Πληρώθηκε", value=item.get("paid", False), key=f"rec_paid_{r_id}")
             if new_paid != item.get("paid", False):
                 if new_paid:
                     now_local = datetime.date.today()
-                    safe_day = min(item["due_day"], calendar.monthrange(now_local.year, now_local.month)[1])
+                    safe_day = min(r_day, calendar.monthrange(now_local.year, now_local.month)[1])
                     tx_date = datetime.date(now_local.year, now_local.month, safe_day)
                     try:
-                        res = supabase.table("transactions").insert({"date": str(tx_date), "category": "Σταθερά Έξοδα", "amount": float(item["amount"]), "type": "Έξοδο", "note": f"Σταθερό - {item['title']}"}).execute()
+                        res = supabase.table("transactions").insert({"date": str(tx_date), "category": "Σταθερά Έξοδα", "amount": r_amount, "type": "Έξοδο", "note": f"Σταθερό - {r_title}"}).execute()
                         new_tx_id = res.data[0]["id"] if res.data else None
                         supabase.table("recurring_expenses").update({"paid": True, "tx_id": new_tx_id}).eq("id", r_id).execute()
                         refresh_table_and_rerun(fetch_recurring, fetch_transactions)
@@ -808,21 +832,21 @@ with main_tab5:
                     except Exception as e:
                         st.error(f"Σφάλμα ακύρωσης πληρωμής: {e}")
         with col_r2:
-            new_amt = st.number_input("Ποσό (€)", min_value=0.0, value=float(item["amount"]), step=5.0, key=f"rec_amt_{r_id}")
-            if new_amt != item["amount"]:
+            new_amt = st.number_input("Ποσό (€)", min_value=0.0, value=r_amount, step=5.0, key=f"rec_amt_{r_id}")
+            if new_amt != r_amount:
                 supabase.table("recurring_expenses").update({"amount": float(new_amt)}).eq("id", r_id).execute()
                 refresh_table_and_rerun(fetch_recurring)
         with col_r3:
-            new_day = st.number_input("Ημέρα", min_value=1, max_value=31, value=int(item["due_day"]), key=f"rec_day_{r_id}")
-            if new_day != item["due_day"]:
-                supabase.table("recurring_expenses").update({"due_day": int(new_day)}).eq("id", r_id).execute()
+            new_day_val = st.number_input("Ημέρα", min_value=1, max_value=31, value=r_day, key=f"rec_day_{r_id}")
+            if new_day_val != r_day:
+                supabase.table("recurring_expenses").update({"due_day": int(new_day_val)}).eq("id", r_id).execute()
                 refresh_table_and_rerun(fetch_recurring)
         with col_r4:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🗑️", key=f"del_rec_{r_id}"):
                 try:
                     if item.get("tx_id"): supabase.table("transactions").delete().eq("id", item["tx_id"]).execute()
-                    undo_payload = {"title": item["title"], "amount": item["amount"], "due_day": item["due_day"], "paid": False, "tx_id": None}
+                    undo_payload = {"title": r_title, "amount": r_amount, "due_day": r_day, "paid": False, "tx_id": None}
                     supabase.table("recurring_expenses").delete().eq("id", r_id).execute()
                     stash_for_undo("recurring", undo_payload)
                     refresh_table_and_rerun(fetch_recurring, fetch_transactions)
@@ -846,17 +870,20 @@ with main_tab6:
 
     st.markdown("---")
     for item in checklist_data:
-        chk_id = item["id"]
+        chk_id = item.get("id")
+        chk_task = item.get("task", "Εργασία")
+        chk_done = item.get("done", False)
+
         c_col1, c_col2 = st.columns([4, 1])
         with c_col1:
-            chk_val = st.checkbox(item["task"], value=item["done"], key=f"chk_{chk_id}")
-            if chk_val != item["done"]:
+            chk_val = st.checkbox(chk_task, value=chk_done, key=f"chk_{chk_id}")
+            if chk_val != chk_done:
                 supabase.table("checklist_items").update({"done": chk_val}).eq("id", chk_id).execute()
                 refresh_table_and_rerun(fetch_checklist)
         with c_col2:
             if st.button("🗑️", key=f"del_chk_{chk_id}"):
                 try:
-                    undo_payload = {"task": item["task"], "done": item["done"]}
+                    undo_payload = {"task": chk_task, "done": chk_done}
                     supabase.table("checklist_items").delete().eq("id", chk_id).execute()
                     stash_for_undo("checklist", undo_payload)
                     refresh_table_and_rerun(fetch_checklist)
