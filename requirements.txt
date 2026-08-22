@@ -6,3 +6,4 @@ postgrest
 fpdf2
 pillow
 pytesseract
+openpyxl
