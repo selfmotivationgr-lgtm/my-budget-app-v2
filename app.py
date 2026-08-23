@@ -311,42 +311,42 @@ if not st.session_state["authenticated"]:
 
 
 # --- CACHED DATA FETCHERS (WITH SAFE FALLBACKS) ---
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)
 def fetch_transactions():
     try:
         return supabase.table("transactions").select("*").order("date", desc=True).execute().data
     except Exception:
         return []
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)
 def fetch_savings():
     try:
         return supabase.table("savings").select("*").order("date", desc=True).execute().data
     except Exception:
         return []
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)
 def fetch_buckets():
     try:
         return supabase.table("buckets").select("*").order("id").execute().data
     except Exception:
         return []
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)
 def fetch_recurring():
     try:
         return supabase.table("recurring_expenses").select("*").order("id").execute().data
     except Exception:
         return []
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)
 def fetch_checklist():
     try:
         return supabase.table("checklist_items").select("*").order("id").execute().data
     except Exception:
         return []
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)
 def fetch_debts():
     try:
         data = supabase.table("debts").select("*").eq("id", 1).execute().data
@@ -354,7 +354,7 @@ def fetch_debts():
     except Exception:
         return {"card_balance": 0.0, "loan_balance": 0.0}
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)
 def fetch_category_budgets():
     try:
         return supabase.table("category_budgets").select("*").execute().data
