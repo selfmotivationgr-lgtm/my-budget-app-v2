@@ -896,41 +896,47 @@ with main_tab5:
         st.markdown("---")
 
 # ==========================================
-# TAB 6: WEEKLY CHECKLIST
+# TAB 6: WEEKLY CHECKLIST (SILENT AUTO-REFRESH)
 # ==========================================
 with main_tab6:
-    clay_header("📋", "Εβδομαδιαίο Checklist", "Προσθέστε, τσεκάρετε ή διαγράψτε εργασίες", accent="purple")
+    @st.fragment(run_every="15s")
+    def render_checklist_fragment():
+        fetch_checklist.clear()
+        fresh_checklist = fetch_checklist() or []
 
-    new_task = st.text_input("➕ Νέα Εργασία Checklist")
-    if st.button("Προσθήκη Εργασίας") and new_task:
-        try:
-            supabase.table("checklist_items").insert({"task": new_task, "done": False}).execute()
-            refresh_table_and_rerun(fetch_checklist)
-        except Exception as e:
-            st.error(f"Σφάλμα προσθήκης checklist: {e}")
+        clay_header("📋", "Εβδομαδιαίο Checklist", "Προσθέστε, τσεκάρετε ή διαγράψτε εργασίες", accent="purple")
 
-    st.markdown("---")
-    for item in checklist_data:
-        chk_id = item.get("id")
-        chk_task = item.get("task", "Εργασία")
-        chk_done = item.get("done", False)
-
-        c_col1, c_col2 = st.columns([4, 1])
-        with c_col1:
-            chk_val = st.checkbox(chk_task, value=chk_done, key=f"chk_{chk_id}")
-            if chk_val != chk_done:
-                supabase.table("checklist_items").update({"done": chk_val}).eq("id", chk_id).execute()
+        new_task = st.text_input("➕ Νέα Εργασία Checklist", key="chk_input_new")
+        if st.button("Προσθήκη Εργασίας") and new_task:
+            try:
+                supabase.table("checklist_items").insert({"task": new_task, "done": False}).execute()
                 refresh_table_and_rerun(fetch_checklist)
-        with c_col2:
-            if st.button("🗑️", key=f"del_chk_{chk_id}"):
-                try:
-                    undo_payload = {"task": chk_task, "done": chk_done}
-                    supabase.table("checklist_items").delete().eq("id", chk_id).execute()
-                    stash_for_undo("checklist", undo_payload)
-                    refresh_table_and_rerun(fetch_checklist)
-                except Exception as e:
-                    st.error(f"Σφάλμα διαγραφής checklist: {e}")
+            except Exception as e:
+                st.error(f"Σφάλμα προσθήκης checklist: {e}")
 
+        st.markdown("---")
+        for item in fresh_checklist:
+            chk_id = item.get("id")
+            chk_task = item.get("task", "Εργασία")
+            chk_done = item.get("done", False)
+
+            c_col1, c_col2 = st.columns([4, 1])
+            with c_col1:
+                chk_val = st.checkbox(chk_task, value=chk_done, key=f"chk_{chk_id}")
+                if chk_val != chk_done:
+                    supabase.table("checklist_items").update({"done": chk_val}).eq("id", chk_id).execute()
+                    refresh_table_and_rerun(fetch_checklist)
+            with c_col2:
+                if st.button("🗑️", key=f"del_chk_{chk_id}"):
+                    try:
+                        undo_payload = {"task": chk_task, "done": chk_done}
+                        supabase.table("checklist_items").delete().eq("id", chk_id).execute()
+                        stash_for_undo("checklist", undo_payload)
+                        refresh_table_and_rerun(fetch_checklist)
+                    except Exception as e:
+                        st.error(f"Σφάλμα διαγραφής checklist: {e}")
+
+    render_checklist_fragment()
 # ==========================================
 # TAB 7: DEBT SIMULATOR
 # ==========================================
