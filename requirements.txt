@@ -7,3 +7,4 @@ fpdf2
 pillow
 pytesseract
 openpyxl
+streamlit-autorefresh
