@@ -447,7 +447,22 @@ selected_year = st.sidebar.selectbox("Έτος", years, index=years.index(curren
 selected_month_name = st.sidebar.selectbox("Μήνας", MONTH_NAMES, index=current_month - 1)
 selected_month = MONTH_NAMES.index(selected_month_name) + 1
 
-monthly_budget = st.sidebar.number_input("Μηνιαίο Όριο (€)", min_value=0.0, value=1200.0, step=50.0)
+# --- PERSISTENT MONTHLY BUDGET ---
+if "monthly_budget_val" not in st.session_state:
+    st.session_state["monthly_budget_val"] = 1200.0
+
+monthly_budget = st.sidebar.number_input(
+    "Μηνιαίο Όριο (€)", 
+    min_value=0.0, 
+    value=st.session_state["monthly_budget_val"], 
+    step=50.0,
+    key="monthly_budget_input"
+)
+
+# Αν αλλάξει η τιμή, την κρατάμε στο session_state
+if monthly_budget != st.session_state["monthly_budget_val"]:
+    st.session_state["monthly_budget_val"] = monthly_budget
+    st.rerun()
 
 with st.sidebar.expander("🎯 Προϋπολογισμοί ανά Κατηγορία"):
     st.caption("Βάλε 0 για να απενεργοποιήσεις το όριο μιας κατηγορίας.")
