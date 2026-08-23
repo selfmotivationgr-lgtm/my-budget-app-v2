@@ -8,6 +8,10 @@ import plotly.graph_objects as go
 import streamlit as st
 from supabase import create_client
 from fpdf import FPDF
+from streamlit_autorefresh import st_autorefresh
+
+# Ανανέωση της εφαρμογής αυτόματα κάθε 30 δευτερόλεπτα
+st_autorefresh(interval=15 * 1000, key="datarefresh")
 
 # --- STREAMLIT CONFIG & FINTECH REVOLUT UI ---
 st.set_page_config(
