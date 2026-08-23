@@ -507,9 +507,27 @@ with main_tab1:
         if monthly_budget > 0:
             pct_used = (expenses / monthly_budget) * 100
             if pct_used >= 100:
-                st.error(f"🚨 **Υπέρβαση Budget!** Έχεις καταναλώσει το {pct_used:.1f}% του ορίου ({expenses:.2f} / {monthly_budget:.2f}€).")
+                st.error(f"🚨 **Υπέρβαση Συνολικού Budget!** Έχεις καταναλώσει το {pct_used:.1f}% του ορίου ({expenses:.2f} / {monthly_budget:.2f}€).")
             elif pct_used >= 80:
-                st.warning(f"⚠️ **Προσοχή:** Έχεις φτάσει το {pct_used:.1f}% του μηνιαίου ορίου.")
+                st.warning(f"⚠️ **Προσοχή:** Έχεις φτάσει το {pct_used:.1f}% του συνολικού μηνιαίου ορίου.")
+
+        # --- SMART CATEGORY BUDGET TRACKER ---
+        if category_budgets and not filtered_df.empty:
+            exp_df_cat = filtered_df[filtered_df["type"] == "Έξοδο"]
+            with st.expander("📊 Κατάσταση Προϋπολογισμών Κατηγοριών", expanded=False):
+                for cat, limit in category_budgets.items():
+                    if limit > 0:
+                        cat_spent = exp_df_cat.loc[exp_df_cat["category"] == cat, "amount"].sum() if not exp_df_cat.empty else 0.0
+                        ratio = min(cat_spent / limit, 1.0)
+                        pct = (cat_spent / limit) * 100
+                        
+                        st.caption(f"**{cat}**: {cat_spent:,.2f}€ / {limit:,.2f}€ ({pct:.1f}%)")
+                        st.progress(ratio)
+                        
+                        if pct >= 100:
+                            st.caption("🚨 *Υπέρβαση κατηγορίας!*")
+                        elif pct >= 80:
+                            st.caption("⚠️ *Πλησιάζεις το όριο!*")
 
         # QUICK ADD
         q_col1, q_col2, q_col3 = st.columns(3)
