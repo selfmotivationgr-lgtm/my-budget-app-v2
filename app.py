@@ -8,10 +8,6 @@ import plotly.graph_objects as go
 import streamlit as st
 from supabase import create_client
 from fpdf import FPDF
-from streamlit_autorefresh import st_autorefresh
-
-# Ανανέωση της εφαρμογής αυτόματα κάθε 30 δευτερόλεπτα
-st_autorefresh(interval=15 * 1000, key="datarefresh")
 
 # --- STREAMLIT CONFIG & FINTECH REVOLUT UI ---
 st.set_page_config(
@@ -484,132 +480,142 @@ if st.sidebar.button("🔒 Αποσύνδεση"):
 )
 
 # ==========================================
-# TAB 1: DASHBOARD
+# TAB 1: DASHBOARD (SILENT REFRESH VIA FRAGMENT)
 # ==========================================
 with main_tab1:
-    clay_header("👛", "Dashboard", f"Επισκόπηση για {selected_month_name} {selected_year}", accent="blue")
+    @st.fragment(run_every="15s")
+    def render_live_dashboard_fragment():
+        fetch_transactions.clear()
+        fresh_data = fetch_transactions() or []
+        fresh_df = pd.DataFrame(fresh_data) if fresh_data else pd.DataFrame()
+        if not fresh_df.empty:
+            fresh_df["date"] = pd.to_datetime(fresh_df["date"])
 
-    if not df.empty:
-        filtered_df = df[(df["date"].dt.year == selected_year) & (df["date"].dt.month == selected_month)].copy()
-        income = filtered_df.loc[filtered_df["type"] == "Έσοδο", "amount"].sum() if not filtered_df.empty else 0.0
-        expenses = filtered_df.loc[filtered_df["type"] == "Έξοδο", "amount"].sum() if not filtered_df.empty else 0.0
-        balance = income - expenses
-    else:
-        filtered_df = pd.DataFrame()
-        income, expenses, balance = 0.0, 0.0, 0.0
+        clay_header("👛", "Dashboard", f"Επισκόπηση για {selected_month_name} {selected_year}", accent="blue")
 
-    st.markdown(f'<div class="hero-container"><div class="hero-label">Συνολικό Υπόλοιπο ({selected_month_name})</div><div class="hero-amount">{balance:,.2f} €</div></div>', unsafe_allow_html=True)
+        if not fresh_df.empty:
+            filtered_df = fresh_df[(fresh_df["date"].dt.year == selected_year) & (fresh_df["date"].dt.month == selected_month)].copy()
+            income = filtered_df.loc[filtered_df["type"] == "Έσοδο", "amount"].sum() if not filtered_df.empty else 0.0
+            expenses = filtered_df.loc[filtered_df["type"] == "Έξοδο", "amount"].sum() if not filtered_df.empty else 0.0
+            balance = income - expenses
+        else:
+            filtered_df = pd.DataFrame()
+            income, expenses, balance = 0.0, 0.0, 0.0
 
-    if monthly_budget > 0:
-        pct_used = (expenses / monthly_budget) * 100
-        if pct_used >= 100:
-            st.error(f"🚨 **Υπέρβαση Budget!** Έχεις καταναλώσει το {pct_used:.1f}% του ορίου ({expenses:.2f} / {monthly_budget:.2f}€).")
-        elif pct_used >= 80:
-            st.warning(f"⚠️ **Προσοχή:** Έχεις φτάσει το {pct_used:.1f}% του μηνιαίου ορίου.")
+        st.markdown(f'<div class="hero-container"><div class="hero-label">Συνολικό Υπόλοιπο ({selected_month_name})</div><div class="hero-amount">{balance:,.2f} €</div></div>', unsafe_allow_html=True)
 
-    # QUICK ADD
-    q_col1, q_col2, q_col3 = st.columns(3)
-    today_str = str(datetime.date.today())
-    quick_adds = [
-        (q_col1, "+ Καφές 2.50€", "Φαγητό/Καφές", 2.50, "Καφές", "☕"),
-        (q_col2, "+ Βενζίνη 20€", "Καύσιμα/Μεταφορές", 20.00, "Βενζίνη", "⛽"),
-        (q_col3, "+ Super 50€", "Σούπερ Μάρκετ", 50.00, "Supermarket", "🛒"),
-    ]
-    for col, label, category, amount, note, icon in quick_adds:
-        with col:
-            if st.button(label, use_container_width=True):
-                try:
-                    supabase.table("transactions").insert({"date": today_str, "category": category, "amount": amount, "type": "Έξοδο", "note": f"Quick Add - {note}"}).execute()
-                    st.toast(f"Προστέθηκε: {note} {amount:.2f}€", icon=icon)
-                    refresh_table_and_rerun(fetch_transactions)
-                except Exception as e:
-                    st.error(f"Σφάλμα καταχώρησης: {e}")
+        if monthly_budget > 0:
+            pct_used = (expenses / monthly_budget) * 100
+            if pct_used >= 100:
+                st.error(f"🚨 **Υπέρβαση Budget!** Έχεις καταναλώσει το {pct_used:.1f}% του ορίου ({expenses:.2f} / {monthly_budget:.2f}€).")
+            elif pct_used >= 80:
+                st.warning(f"⚠️ **Προσοχή:** Έχεις φτάσει το {pct_used:.1f}% του μηνιαίου ορίου.")
 
-    # MANUAL INPUT FORM
-    with st.expander("➕ Πλήρης Καταγραφή Συναλλαγής", expanded=False):
-        with st.form("entry_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                date = st.date_input("Ημερομηνία", datetime.date.today())
-                t_type = st.selectbox("Τύπος", ["Έξοδο", "Έσοδο"])
-                amount = st.number_input("Ποσό (€)", min_value=0.0, format="%.2f")
-            with col2:
-                category = st.selectbox("Κατηγορία", CATEGORIES)
-                note = st.text_input("Σημείωση")
+        # QUICK ADD
+        q_col1, q_col2, q_col3 = st.columns(3)
+        today_str = str(datetime.date.today())
+        quick_adds = [
+            (q_col1, "+ Καφές 2.50€", "Φαγητό/Καφές", 2.50, "Καφές", "☕"),
+            (q_col2, "+ Βενζίνη 20€", "Καύσιμα/Μεταφορές", 20.00, "Βενζίνη", "⛽"),
+            (q_col3, "+ Super 50€", "Σούπερ Μάρκετ", 50.00, "Supermarket", "🛒"),
+        ]
+        for col, label, category, amount, note, icon in quick_adds:
+            with col:
+                if st.button(label, use_container_width=True):
+                    try:
+                        supabase.table("transactions").insert({"date": today_str, "category": category, "amount": amount, "type": "Έξοδο", "note": f"Quick Add - {note}"}).execute()
+                        st.toast(f"Προστέθηκε: {note} {amount:.2f}€", icon=icon)
+                        refresh_table_and_rerun(fetch_transactions)
+                    except Exception as e:
+                        st.error(f"Σφάλμα καταχώρησης: {e}")
 
-            if st.form_submit_button("Καταγραφή") and amount > 0:
-                try:
-                    supabase.table("transactions").insert({"date": str(date), "category": category, "amount": float(amount), "type": t_type, "note": note}).execute()
-                    st.success("Καταχωρήθηκε!")
-                    refresh_table_and_rerun(fetch_transactions)
-                except Exception as e:
-                    st.error(f"Σφάλμα καταχώρησης: {e}")
+        # MANUAL INPUT FORM
+        with st.expander("➕ Πλήρης Καταγραφή Συναλλαγής", expanded=False):
+            with st.form("entry_form", clear_on_submit=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    date = st.date_input("Ημερομηνία", datetime.date.today())
+                    t_type = st.selectbox("Τύπος", ["Έξοδο", "Έσοδο"])
+                    amount = st.number_input("Ποσό (€)", min_value=0.0, format="%.2f")
+                with col2:
+                    category = st.selectbox("Κατηγορία", CATEGORIES)
+                    note = st.text_input("Σημείωση")
 
-    # EDIT / DELETE SECTION
-    with st.expander("✏️ Διορθώσεις & Διαγραφή Συναλλαγών", expanded=False):
+                if st.form_submit_button("Καταγραφή") and amount > 0:
+                    try:
+                        supabase.table("transactions").insert({"date": str(date), "category": category, "amount": float(amount), "type": t_type, "note": note}).execute()
+                        st.success("Καταχωρήθηκε!")
+                        refresh_table_and_rerun(fetch_transactions)
+                    except Exception as e:
+                        st.error(f"Σφάλμα καταχώρησης: {e}")
+
+        # EDIT / DELETE SECTION
+        with st.expander("✏️ Διορθώσεις & Διαγραφή Συναλλαγών", expanded=False):
+            if not filtered_df.empty:
+                tx_options = {row["id"]: f"ID {row['id']} | {row['date'].strftime('%Y-%m-%d')} | {row['category']} | {row['amount']:.2f}€ ({row['type']})" for _, row in filtered_df.iterrows()}
+                selected_tx_id = st.selectbox("Επιλέξτε Συναλλαγή", list(tx_options.keys()), format_func=lambda x: tx_options[x])
+                selected_row = filtered_df[filtered_df["id"] == selected_tx_id].iloc[0]
+
+                with st.form("edit_form"):
+                    e_col1, e_col2 = st.columns(2)
+                    with e_col1:
+                        edit_date = st.date_input("Νέα Ημερομηνία", pd.to_datetime(selected_row["date"]))
+                        edit_type = st.selectbox("Νέος Τύπος", ["Έξοδο", "Έσοδο"], index=0 if selected_row["type"] == "Έξοδο" else 1)
+                        edit_amount = st.number_input("Νέο Ποσό (€)", min_value=0.0, value=float(selected_row["amount"]), format="%.2f")
+                    with e_col2:
+                        edit_cat_idx = CATEGORIES.index(selected_row["category"]) if selected_row["category"] in CATEGORIES else 0
+                        edit_category = st.selectbox("Νέα Κατηγορία", CATEGORIES, index=edit_cat_idx)
+                        edit_note = st.text_input("Νέα Σημείωση", value=str(selected_row["note"]) if pd.notna(selected_row["note"]) else "")
+
+                    btn_save, btn_delete = st.columns(2)
+                    with btn_save:
+                        if st.form_submit_button("💾 Αποθήκευση"):
+                            try:
+                                supabase.table("transactions").update({"date": str(edit_date), "category": edit_category, "amount": float(edit_amount), "type": edit_type, "note": edit_note}).eq("id", selected_tx_id).execute()
+                                st.success("Ενημερώθηκε!")
+                                refresh_table_and_rerun(fetch_transactions)
+                            except Exception as e:
+                                st.error(f"Σφάλμα ενημέρωσης: {e}")
+                    with btn_delete:
+                        if st.form_submit_button("🗑️ Διαγραφή"):
+                            try:
+                                undo_payload = {"date": str(pd.to_datetime(selected_row["date"]).date()), "category": selected_row["category"], "amount": float(selected_row["amount"]), "type": selected_row["type"], "note": selected_row["note"] if pd.notna(selected_row["note"]) else ""}
+                                supabase.table("transactions").delete().eq("id", selected_tx_id).execute()
+                                stash_for_undo("transaction", undo_payload)
+                                st.warning("Διαγράφηκε! (Αναίρεση διαθέσιμη από το sidebar)")
+                                refresh_table_and_rerun(fetch_transactions)
+                            except Exception as e:
+                                st.error(f"Σφάλμα διαγραφής: {e}")
+
+        m1, m2 = st.columns(2)
+        m1.metric("Έσοδα", f"+{income:,.2f} €")
+        m2.metric("Έξοδα", f"-{expenses:,.2f} €")
+
         if not filtered_df.empty:
-            tx_options = {row["id"]: f"ID {row['id']} | {row['date'].strftime('%Y-%m-%d')} | {row['category']} | {row['amount']:.2f}€ ({row['type']})" for _, row in filtered_df.iterrows()}
-            selected_tx_id = st.selectbox("Επιλέξτε Συναλλαγή", list(tx_options.keys()), format_func=lambda x: tx_options[x])
-            selected_row = filtered_df[filtered_df["id"] == selected_tx_id].iloc[0]
+            chart_col1, chart_col2 = st.columns(2)
+            with chart_col1:
+                fig_compare = go.Figure(data=[go.Bar(name='Έσοδα', x=['Σύνολο'], y=[income], marker_color='#30d158'), go.Bar(name='Έξοδα', x=['Σύνολο'], y=[expenses], marker_color='#ff453a')])
+                fig_compare.update_layout(barmode='group', template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(t=10, b=10, l=10, r=10), height=220)
+                st.plotly_chart(fig_compare, use_container_width=True)
 
-            with st.form("edit_form"):
-                e_col1, e_col2 = st.columns(2)
-                with e_col1:
-                    edit_date = st.date_input("Νέα Ημερομηνία", pd.to_datetime(selected_row["date"]))
-                    edit_type = st.selectbox("Νέος Τύπος", ["Έξοδο", "Έσοδο"], index=0 if selected_row["type"] == "Έξοδο" else 1)
-                    edit_amount = st.number_input("Νέο Ποσό (€)", min_value=0.0, value=float(selected_row["amount"]), format="%.2f")
-                with e_col2:
-                    edit_cat_idx = CATEGORIES.index(selected_row["category"]) if selected_row["category"] in CATEGORIES else 0
-                    edit_category = st.selectbox("Νέα Κατηγορία", CATEGORIES, index=edit_cat_idx)
-                    edit_note = st.text_input("Νέα Σημείωση", value=str(selected_row["note"]) if pd.notna(selected_row["note"]) else "")
+            with chart_col2:
+                df_exp = filtered_df[filtered_df["type"] == "Έξοδο"]
+                if not df_exp.empty:
+                    cat_expenses = df_exp.groupby("category")["amount"].sum().reset_index()
+                    fig_pie = px.pie(cat_expenses, values="amount", names="category", hole=0.6, template="plotly_dark", color_discrete_sequence=["#30d158", "#0a84ff", "#ff453a", "#ffd60a", "#bf5af2", "#8e8e93"])
+                    fig_pie.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=220)
+                    st.plotly_chart(fig_pie, use_container_width=True)
 
-                btn_save, btn_delete = st.columns(2)
-                with btn_save:
-                    if st.form_submit_button("💾 Αποθήκευση"):
-                        try:
-                            supabase.table("transactions").update({"date": str(edit_date), "category": edit_category, "amount": float(edit_amount), "type": edit_type, "note": edit_note}).eq("id", selected_tx_id).execute()
-                            st.success("Ενημερώθηκε!")
-                            refresh_table_and_rerun(fetch_transactions)
-                        except Exception as e:
-                            st.error(f"Σφάλμα ενημέρωσης: {e}")
-                with btn_delete:
-                    if st.form_submit_button("🗑️ Διαγραφή"):
-                        try:
-                            undo_payload = {"date": str(pd.to_datetime(selected_row["date"]).date()), "category": selected_row["category"], "amount": float(selected_row["amount"]), "type": selected_row["type"], "note": selected_row["note"] if pd.notna(selected_row["note"]) else ""}
-                            supabase.table("transactions").delete().eq("id", selected_tx_id).execute()
-                            stash_for_undo("transaction", undo_payload)
-                            st.warning("Διαγράφηκε! (Αναίρεση διαθέσιμη από το sidebar)")
-                            refresh_table_and_rerun(fetch_transactions)
-                        except Exception as e:
-                            st.error(f"Σφάλμα διαγραφής: {e}")
+            st.subheader("📜 Συναλλαγές")
+            dash_search = st.text_input("🔎 Αναζήτηση (κατηγορία ή σημείωση)", key="dash_search")
+            display_df = filtered_df.copy()
+            if dash_search:
+                _mask = (display_df["category"].str.contains(dash_search, case=False, na=False) | display_df["note"].astype(str).str.contains(dash_search, case=False, na=False))
+                display_df = display_df[_mask]
+            display_df["date"] = display_df["date"].dt.strftime("%Y-%m-%d")
+            st.dataframe(display_df[["id", "date", "type", "category", "amount", "note"]], use_container_width=True, hide_index=True)
 
-    m1, m2 = st.columns(2)
-    m1.metric("Έσοδα", f"+{income:,.2f} €")
-    m2.metric("Έξοδα", f"-{expenses:,.2f} €")
-
-    if not filtered_df.empty:
-        chart_col1, chart_col2 = st.columns(2)
-        with chart_col1:
-            fig_compare = go.Figure(data=[go.Bar(name='Έσοδα', x=['Σύνολο'], y=[income], marker_color='#30d158'), go.Bar(name='Έξοδα', x=['Σύνολο'], y=[expenses], marker_color='#ff453a')])
-            fig_compare.update_layout(barmode='group', template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(t=10, b=10, l=10, r=10), height=220)
-            st.plotly_chart(fig_compare, use_container_width=True)
-
-        with chart_col2:
-            df_exp = filtered_df[filtered_df["type"] == "Έξοδο"]
-            if not df_exp.empty:
-                cat_expenses = df_exp.groupby("category")["amount"].sum().reset_index()
-                fig_pie = px.pie(cat_expenses, values="amount", names="category", hole=0.6, template="plotly_dark", color_discrete_sequence=["#30d158", "#0a84ff", "#ff453a", "#ffd60a", "#bf5af2", "#8e8e93"])
-                fig_pie.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=220)
-                st.plotly_chart(fig_pie, use_container_width=True)
-
-        st.subheader("📜 Συναλλαγές")
-        dash_search = st.text_input("🔎 Αναζήτηση (κατηγορία ή σημείωση)", key="dash_search")
-        display_df = filtered_df.copy()
-        if dash_search:
-            _mask = (display_df["category"].str.contains(dash_search, case=False, na=False) | display_df["note"].astype(str).str.contains(dash_search, case=False, na=False))
-            display_df = display_df[_mask]
-        display_df["date"] = display_df["date"].dt.strftime("%Y-%m-%d")
-        st.dataframe(display_df[["id", "date", "type", "category", "amount", "note"]], use_container_width=True, hide_index=True)
+    render_live_dashboard_fragment()
 
 # ==========================================
 # TAB 2: CASH FLOW FORECASTING (+ NET WORTH)
@@ -624,12 +630,17 @@ with main_tab2:
     days_elapsed = today.day if selected_year == today.year and selected_month == today.month else days_in_month
     days_remaining = max(days_in_month - days_elapsed, 0)
 
-    daily_avg_expense = (expenses / days_elapsed) if days_elapsed > 0 else 0.0
+    filtered_df_tab2 = df[(df["date"].dt.year == selected_year) & (df["date"].dt.month == selected_month)].copy() if not df.empty else pd.DataFrame()
+    income_tab2 = filtered_df_tab2.loc[filtered_df_tab2["type"] == "Έσοδο", "amount"].sum() if not filtered_df_tab2.empty else 0.0
+    expenses_tab2 = filtered_df_tab2.loc[filtered_df_tab2["type"] == "Έξοδο", "amount"].sum() if not filtered_df_tab2.empty else 0.0
+    balance_tab2 = income_tab2 - expenses_tab2
+
+    daily_avg_expense = (expenses_tab2 / days_elapsed) if days_elapsed > 0 else 0.0
     projected_additional_expenses = daily_avg_expense * days_remaining
-    projected_balance = balance - upcoming_recurring_unpaid - projected_additional_expenses
+    projected_balance = balance_tab2 - upcoming_recurring_unpaid - projected_additional_expenses
 
     c_f1, c_f2, c_f3 = st.columns(3)
-    c_f1.metric("Τρέχον Υπόλοιπο (μήνα)", f"{balance:,.2f} €")
+    c_f1.metric("Τρέχον Υπόλοιπο (μήνα)", f"{balance_tab2:,.2f} €")
     c_f2.metric("Ανεξόφλητα Σταθερά", f"-{upcoming_recurring_unpaid:,.2f} €")
     c_f3.metric("Αναμενόμενα Έξοδα", f"-{projected_additional_expenses:,.2f} €")
     st.markdown("---")
@@ -917,10 +928,15 @@ with main_tab8:
 
     range_mode = st.radio("Περίοδος Αναφοράς", ["Επιλεγμένος μήνας (sidebar)", "Προσαρμοσμένο εύρος ημερομηνιών"], horizontal=True)
 
+    filtered_df_tab8 = df[(df["date"].dt.year == selected_year) & (df["date"].dt.month == selected_month)].copy() if not df.empty else pd.DataFrame()
+    income_tab8 = filtered_df_tab8.loc[filtered_df_tab8["type"] == "Έσοδο", "amount"].sum() if not filtered_df_tab8.empty else 0.0
+    expenses_tab8 = filtered_df_tab8.loc[filtered_df_tab8["type"] == "Έξοδο", "amount"].sum() if not filtered_df_tab8.empty else 0.0
+    balance_tab8 = income_tab8 - expenses_tab8
+
     if range_mode == "Επιλεγμένος μήνας (sidebar)":
-        export_df = filtered_df.copy() if not filtered_df.empty else pd.DataFrame()
+        export_df = filtered_df_tab8.copy() if not filtered_df_tab8.empty else pd.DataFrame()
         export_label = f"{selected_year}_{selected_month:02d}"
-        export_income, export_expenses, export_balance = income, expenses, balance
+        export_income, export_expenses, export_balance = income_tab8, expenses_tab8, balance_tab8
         report_month_title, report_year_title = selected_month_name, selected_year
     else:
         rc1, rc2 = st.columns(2)
