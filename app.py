@@ -371,7 +371,8 @@ recurring_data = fetch_recurring() or []
 checklist_data = fetch_checklist() or []
 debts_data = fetch_debts()
 _budget_rows = fetch_category_budgets() or []
-category_budgets = {row["category"]: float(row["monthly_limit"]) for row in _budget_rows if "category" in row}
+category_budgets = {row["category"]: float(row["monthly_limit"]) for row in _budget_rows if "category" in row and row["category"] != "__TOTAL__"}
+saved_total_budget = next((float(row["monthly_limit"]) for row in _budget_rows if row.get("category") == "__TOTAL__"), 1200.0)
 
 
 def refresh_table_and_rerun(*cache_fns) -> None:
@@ -447,22 +448,14 @@ selected_year = st.sidebar.selectbox("Έτος", years, index=years.index(curren
 selected_month_name = st.sidebar.selectbox("Μήνας", MONTH_NAMES, index=current_month - 1)
 selected_month = MONTH_NAMES.index(selected_month_name) + 1
 
-# --- PERSISTENT MONTHLY BUDGET ---
-if "monthly_budget_val" not in st.session_state:
-    st.session_state["monthly_budget_val"] = 1200.0
+monthly_budget = st.sidebar.number_input("Μηνιαίο Όριο (€)", min_value=0.0, value=saved_total_budget, step=50.0)
 
-monthly_budget = st.sidebar.number_input(
-    "Μηνιαίο Όριο (€)", 
-    min_value=0.0, 
-    value=st.session_state["monthly_budget_val"], 
-    step=50.0,
-    key="monthly_budget_input"
-)
-
-# Αν αλλάξει η τιμή, την κρατάμε στο session_state
-if monthly_budget != st.session_state["monthly_budget_val"]:
-    st.session_state["monthly_budget_val"] = monthly_budget
-    st.rerun()
+if monthly_budget != saved_total_budget:
+    try:
+        supabase.table("category_budgets").upsert({"category": "__TOTAL__", "monthly_limit": float(monthly_budget)}).execute()
+        refresh_table_and_rerun(fetch_category_budgets)
+    except Exception as e:
+        st.sidebar.error(f"Σφάλμα αποθήκευσης ορίου: {e}")
 
 with st.sidebar.expander("🎯 Προϋπολογισμοί ανά Κατηγορία"):
     st.caption("Βάλε 0 για να απενεργοποιήσεις το όριο μιας κατηγορίας.")
